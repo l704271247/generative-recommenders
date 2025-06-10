@@ -35,7 +35,7 @@ from generative_recommenders.research.data.eval import (
     get_eval_state,
 )
 
-from generative_recommenders.research.data.reco_dataset import get_reco_dataset
+from generative_recommenders.research.data.reco_dataset_ori import get_reco_dataset
 from generative_recommenders.research.indexing.utils import get_top_k_module
 from generative_recommenders.research.modeling.sequential.autoregressive_losses import (
     BCELoss,
@@ -133,7 +133,6 @@ def train_fn(
     l2_norm_eps: float = 1e-6,
     enable_tf32: bool = False,
     random_seed: int = 42,
-    u_context_max_len: int =4,
 ) -> None:
     # to enable more deterministic results.
     random.seed(random_seed)
@@ -171,7 +170,7 @@ def train_fn(
     model_debug_str = main_module
     if embedding_module_type == "local":
         embedding_module: EmbeddingModule = LocalEmbeddingModule(
-            num_items=dataset.max_id,
+            num_items=dataset.max_item_id,
             item_embedding_dim=item_embedding_dim,
         )
     else:
@@ -202,7 +201,6 @@ def train_fn(
         max_sequence_len=dataset.max_sequence_length + gr_output_length + 1,
         embedding_dim=item_embedding_dim,
         dropout_rate=dropout_rate,
-        user_fea_len=u_context_max_len,
     )
 
     model = get_sequential_encoder(
@@ -387,7 +385,7 @@ def train_fn(
                 #  `_item_emb`.
                 negatives_sampler._item_emb = model.module._embedding_module._item_emb
 
-            ar_mask = [False] * 4 + supervision_ids[:, 1:] != 0
+            ar_mask = supervision_ids[:, 1:] != 0
             loss, aux_losses = ar_loss(
                 lengths=seq_features.past_lengths,  # [B],
                 output_embeddings=seq_embeddings[:, :-1, :],  # [B, N-1, D]

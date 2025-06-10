@@ -35,7 +35,6 @@ class DatasetV2(torch.utils.data.Dataset):
         shift_id_by: int = 0,
         chronological: bool = False,
         sample_ratio: float = 1.0,
-        user_fea_id_base: Optional[Dict[str, int]] = None,
     ) -> None:
         """
         Args:
@@ -54,7 +53,6 @@ class DatasetV2(torch.utils.data.Dataset):
         self._shift_id_by: int = shift_id_by
         self._chronological: bool = chronological
         self._sample_ratio: float = sample_ratio
-        self._user_fea_id_base = user_fea_id_base
 
     def __len__(self) -> int:
         return len(self.ratings_frame)
@@ -68,11 +66,7 @@ class DatasetV2(torch.utils.data.Dataset):
         return sample
 
     def load_item(self, data) -> Dict[str, torch.Tensor]:
-        user_id = data.user_id.astype(int)
-        sex = data.sex.astype(int) + self._user_fea_id_base['sex']
-        age_group = data.age_group.astype(int) + self._user_fea_id_base['age_group']
-        occupation = data.occupation.astype(int) + self._user_fea_id_base['occupation']
-        zip_code = data.zip_code.astype(int) + self._user_fea_id_base['zip_code']
+        user_id = data.user_id
 
         def eval_as_list(x: str, ignore_last_n: int) -> List[int]:
             y = eval(x)
@@ -157,7 +151,7 @@ class DatasetV2(torch.utils.data.Dataset):
         if self._chronological:
             historical_ids.reverse()
             historical_ratings.reverse()
-            historical_timestamps.reverse()    
+            historical_timestamps.reverse()
 
         max_seq_len = self._padding_length - 1
         history_length = min(len(historical_ids), max_seq_len)
@@ -166,35 +160,24 @@ class DatasetV2(torch.utils.data.Dataset):
             max_seq_len,
             self._chronological,
         )
-        historical_ids = sex.tolist() + age_group.tolist() + occupation.tolist() + zip_code.tolist() + historical_ids
         historical_ratings = _truncate_or_pad_seq(
             historical_ratings,
             max_seq_len,
             self._chronological,
         )
-        historical_ratings =  [0] * 4 + historical_ratings
-
         historical_timestamps = _truncate_or_pad_seq(
             historical_timestamps,
             max_seq_len,
             self._chronological,
         )
-        historical_timestamps = [0] * 4 + historical_timestamps
         # moved to features.py
         # if self._chronological:
         #     historical_ids.append(0)
         #     historical_ratings.append(0)
         #     historical_timestamps.append(0)
         # print(historical_ids, historical_ratings, historical_timestamps, target_ids, target_ratings, target_timestamps)
-        
-        
-    
         ret = {
             "user_id": user_id,
-            "sex": sex,
-            "age_group": age_group,
-            "occupation": occupation,
-            "zip_code": zip_code,
             "historical_ids": torch.tensor(historical_ids, dtype=torch.int64),
             "historical_ratings": torch.tensor(historical_ratings, dtype=torch.int64),
             "historical_timestamps": torch.tensor(
@@ -206,3 +189,61 @@ class DatasetV2(torch.utils.data.Dataset):
             "target_timestamps": target_timestamps,
         }
         return ret
+
+
+class MultiFileDatasetV2(DatasetV2, torch.utils.data.Dataset):
+    def __init__(
+        self,
+        file_prefix: str,
+        num_files: int,
+        padding_length: int,
+        ignore_last_n: int,  # used for creating train/valid/test sets
+        shift_id_by: int = 0,
+        chronological: bool = False,
+        sample_ratio: float = 1.0,
+    ) -> None:
+        torch.utils.data.Dataset().__init__()
+        self._file_prefix: str = file_prefix
+        self._num_files: int = num_files
+        with open(f"{file_prefix}_users.csv", "r") as file:
+            reader = csv.reader(file)
+            self.users_cumsum: List[int] = np.cumsum(
+                [int(row[1]) for row in reader]
+            ).tolist()
+        self._padding_length: int = padding_length
+        self._ignore_last_n: int = ignore_last_n
+        self._shift_id_by: int = shift_id_by
+        self._chronological: bool = chronological
+        self._sample_ratio: float = sample_ratio
+
+    def __len__(self) -> int:
+        return self.users_cumsum[-1]
+
+    def _process_line(self, line: str) -> pd.Series:
+        reader = csv.reader([line])
+        parsed_line = next(reader)
+        user_id = int(parsed_line[0])
+        sequence_item_ids = parsed_line[1]
+        sequence_ratings = parsed_line[2]
+        return pd.Series(
+            data={
+                "user_id": user_id,
+                "sequence_item_ids": sequence_item_ids,
+                "sequence_ratings": sequence_ratings,
+                "sequence_timestamps": sequence_item_ids,  # placeholder
+            }
+        )
+
+    def __getitem__(self, idx) -> Dict[str, torch.Tensor]:
+        assert idx < self.users_cumsum[-1]
+        file_idx: int = 0
+        while self.users_cumsum[file_idx] <= idx:
+            file_idx += 1
+        if file_idx == 0:
+            local_idx = idx
+        else:
+            local_idx = idx - self.users_cumsum[file_idx - 1]
+        line = linecache.getline(f"{self._file_prefix}_{file_idx}.csv", local_idx + 1)
+        data = self._process_line(line)
+        sample = self.load_item(data)
+        return sample
