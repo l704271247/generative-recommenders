@@ -22,7 +22,7 @@ import pandas as pd
 
 import torch
 
-from generative_recommenders.research.data.dataset import DatasetV2, MultiFileDatasetV2
+from generative_recommenders.research.data.dataset import DatasetV2 # , MultiFileDatasetV2
 from generative_recommenders.research.data.item_features import ItemFeatures
 from generative_recommenders.research.data.preprocessor import get_common_preprocessors
 
@@ -35,8 +35,8 @@ class RecoDataset:
     all_item_ids: List[int]
     train_dataset: torch.utils.data.Dataset
     eval_dataset: torch.utils.data.Dataset
-    item_features: Optional[ItemFeatures]
-    user_fea_id_base: Dict[str, int]
+    item_features: ItemFeatures
+    user_fea_id_base: dict[str, int]
     max_id: int
 
 
@@ -138,5 +138,5 @@ def get_reco_dataset(
         eval_dataset=eval_dataset,
         item_features=item_features,
         user_fea_id_base=user_fea_id_base,
-        max_id=max_item_id + 2 + 7 + 21 + 3401
+        max_id=max_item_id + 2 + 7 + 21 + 3439
     )

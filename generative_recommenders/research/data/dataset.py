@@ -163,20 +163,20 @@ class DatasetV2(torch.utils.data.Dataset):
         history_length = min(len(historical_ids), max_seq_len)
         historical_ids = _truncate_or_pad_seq(
             historical_ids,
-            max_seq_len,
+            max_seq_len-4,
             self._chronological,
         )
-        historical_ids = sex.tolist() + age_group.tolist() + occupation.tolist() + zip_code.tolist() + historical_ids
+        historical_ids = [sex, age_group, occupation, zip_code] + historical_ids
         historical_ratings = _truncate_or_pad_seq(
             historical_ratings,
-            max_seq_len,
+            max_seq_len-4,
             self._chronological,
         )
         historical_ratings =  [0] * 4 + historical_ratings
 
         historical_timestamps = _truncate_or_pad_seq(
             historical_timestamps,
-            max_seq_len,
+            max_seq_len-4,
             self._chronological,
         )
         historical_timestamps = [0] * 4 + historical_timestamps

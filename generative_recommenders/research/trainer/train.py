@@ -386,8 +386,8 @@ def train_fn(
                 # pyre-fixme[16]: `InBatchNegativesSampler` has no attribute
                 #  `_item_emb`.
                 negatives_sampler._item_emb = model.module._embedding_module._item_emb
-
-            ar_mask = [False] * 4 + supervision_ids[:, 1:] != 0
+            ar_mask = torch.cat([torch.tensor([False] * 4, device=supervision_ids.device).repeat([B,1])
+                                 ,(supervision_ids[:, 5:] != 0)], dim=1)
             loss, aux_losses = ar_loss(
                 lengths=seq_features.past_lengths,  # [B],
                 output_embeddings=seq_embeddings[:, :-1, :],  # [B, N-1, D]
