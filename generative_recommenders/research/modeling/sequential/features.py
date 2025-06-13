@@ -83,6 +83,17 @@ def movielens_seq_features_from_row(
             index=historical_lengths.view(-1, 1),
             src=target_timestamps.view(-1, 1),
         )
+        historical_item_fea_ids = torch.cat(
+            [
+                historical_item_fea_ids,
+                torch.zeros(
+                    (B, max_output_length, historical_item_fea_ids.size(2)),
+                    dtype=historical_item_fea_ids.dtype,
+                    device=device,
+                ),
+            ],
+            dim=1,
+        )
         # print(f"historical_ids.size()={historical_ids.size()}, historical_timestamps.size()={historical_timestamps.size()}")
     features = SequentialFeatures(
         past_lengths=historical_lengths,
