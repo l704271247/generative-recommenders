@@ -46,7 +46,8 @@ def get_reco_dataset(
     chronological: bool,
     positional_sampling_ratio: float = 1.0,
 ) -> RecoDataset:
-
+    dp = get_common_preprocessors()[dataset_name]
+    max_item_id = dp.expected_max_item_id()
     user_fea_id_base = {
         "sex": max_item_id,  # 枚举值2
         "age_group": max_item_id + 2, # 枚举值7
@@ -58,8 +59,6 @@ def get_reco_dataset(
         "titles": max_item_id + 2 + 7 + 21 + 3438 + 63, # 枚举值16383
         "years": max_item_id + 2 + 7 + 21 + 3438 + 63 + 16383, # 枚举值511
     }
-    dp = get_common_preprocessors()[dataset_name]
-
     items = pd.read_csv(dp.processed_item_csv(), delimiter=",")
     max_jagged_dimension = 16
     expected_max_item_id = dp.expected_max_item_id()
@@ -112,7 +111,6 @@ def get_reco_dataset(
             for j in range(min(len(f_values), max_jagged_dimension)):
                 item_features.values[f][movie_id][j] = f_values[j]
         all_item_ids.append(movie_id)
-    max_item_id = dp.expected_max_item_id()
     for x in all_item_ids:
         assert x > 0, "x in all_item_ids should be positive"
 
