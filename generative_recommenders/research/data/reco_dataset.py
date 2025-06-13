@@ -57,7 +57,7 @@ def get_reco_dataset(
     item_fea_id_base = {
         "genres": max_item_id + 2 + 7 + 21 + 3438, # 枚举值63
         "titles": max_item_id + 2 + 7 + 21 + 3438 + 63, # 枚举值16383
-        "years": max_item_id + 2 + 7 + 21 + 3438 + 63 + 16383, # 枚举值511
+        "year": max_item_id + 2 + 7 + 21 + 3438 + 63 + 16383, # 枚举值511
     }
     items = pd.read_csv(dp.processed_item_csv(), delimiter=",")
     max_jagged_dimension = 16

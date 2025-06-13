@@ -365,8 +365,8 @@ def train_fn(
             )
             seq_features.past_payloads['item_fea_ids'].scatter_(
                 dim=1,
-                index=seq_features.past_lengths.view(-1, 1),
-                src=target_item_fea_ids,
+                index=seq_features.past_lengths.view(-1, 1, 1).repeat([1,1,3*16]),
+                src=target_item_fea_ids.view(-1,1,3*16),
             ) # [B, N, 3*max_jagged_dimension]
 
             opt.zero_grad()
