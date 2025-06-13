@@ -46,6 +46,18 @@ def get_reco_dataset(
     chronological: bool,
     positional_sampling_ratio: float = 1.0,
 ) -> RecoDataset:
+
+    user_fea_id_base = {
+        "sex": max_item_id,  # 枚举值2
+        "age_group": max_item_id + 2, # 枚举值7
+        "occupation": max_item_id + 2 + 7, # 枚举值21
+        "zip_code": max_item_id + 2 + 7 + 21, # 枚举值3438,  
+    }
+    item_fea_id_base = {
+        "genres": max_item_id + 2 + 7 + 21 + 3438, # 枚举值63
+        "titles": max_item_id + 2 + 7 + 21 + 3438 + 63, # 枚举值16383
+        "years": max_item_id + 2 + 7 + 21 + 3438 + 63 + 16383, # 枚举值511
+    }
     dp = get_common_preprocessors()[dataset_name]
 
     items = pd.read_csv(dp.processed_item_csv(), delimiter=",")
@@ -54,6 +66,7 @@ def get_reco_dataset(
     assert expected_max_item_id is not None
     item_features: ItemFeatures = ItemFeatures(
         max_ind_range=[63, 16383, 511],
+        item_fea_id_base=item_fea_id_base,
         num_items=expected_max_item_id + 1,
         max_jagged_dimension=max_jagged_dimension,
         lengths=[
@@ -83,9 +96,9 @@ def get_reco_dataset(
         genres = row["genres"].split("|")
         titles = row["cleaned_title"].split(" ")
         # print(f"{index}: genres{genres}, title{titles}")
-        genres_vector = [hash(x) % item_features.max_ind_range[0] for x in genres]
-        titles_vector = [hash(x) % item_features.max_ind_range[1] for x in titles]
-        years_vector = [hash(row["year"]) % item_features.max_ind_range[2]]
+        genres_vector = [hash(x) % item_features.max_ind_range[0] + item_fea_id_base['genres'] for x in genres]
+        titles_vector = [hash(x) % item_features.max_ind_range[1] + item_fea_id_base['titles'] for x in titles]
+        years_vector = [hash(row["year"]) % item_features.max_ind_range[2] + item_fea_id_base['year']]
         item_features.lengths[0][movie_id] = min(
             len(genres_vector), max_jagged_dimension
         )
@@ -103,12 +116,6 @@ def get_reco_dataset(
     for x in all_item_ids:
         assert x > 0, "x in all_item_ids should be positive"
 
-    user_fea_id_base = {
-        "sex": max_item_id,  # 枚举值2
-        "age_group": max_item_id + 2, # 枚举值7
-        "occupation": max_item_id + 2 + 7, # 枚举值21
-        "zip_code": max_item_id + 2 + 7 + 21, # 枚举值3401,  
-    }
     if dataset_name == "ml-1m":
         train_dataset = DatasetV2(
             ratings_file=dp.output_format_csv(),
@@ -117,6 +124,7 @@ def get_reco_dataset(
             chronological=chronological,
             sample_ratio=positional_sampling_ratio,
             user_fea_id_base=user_fea_id_base,
+            item_features=item_features,
         )
         eval_dataset = DatasetV2(
             ratings_file=dp.output_format_csv(),
@@ -125,9 +133,12 @@ def get_reco_dataset(
             chronological=chronological,
             sample_ratio=1.0,  # do not sample
             user_fea_id_base=user_fea_id_base,
+            item_features=item_features,
         )
     else:
         raise ValueError(f"Unknown dataset {dataset_name}")
+
+    print("test item_features:", item_features)
 
     return RecoDataset(
         max_sequence_length=max_sequence_length,
@@ -138,5 +149,5 @@ def get_reco_dataset(
         eval_dataset=eval_dataset,
         item_features=item_features,
         user_fea_id_base=user_fea_id_base,
-        max_id=max_item_id + 2 + 7 + 21 + 3439
+        max_id=max_item_id + 2 + 7 + 21 + 3439 + 63 + 16383 + 511
     )

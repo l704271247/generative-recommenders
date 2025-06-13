@@ -22,6 +22,7 @@ from typing import Dict, List, Optional, Tuple
 import numpy as np
 import pandas as pd
 import torch
+from generative_recommenders.research.data.item_features import ItemFeatures
 
 
 class DatasetV2(torch.utils.data.Dataset):
@@ -36,6 +37,7 @@ class DatasetV2(torch.utils.data.Dataset):
         chronological: bool = False,
         sample_ratio: float = 1.0,
         user_fea_id_base: Optional[Dict[str, int]] = None,
+        item_features: Optional[ItemFeatures] = None,
     ) -> None:
         """
         Args:
@@ -55,6 +57,7 @@ class DatasetV2(torch.utils.data.Dataset):
         self._chronological: bool = chronological
         self._sample_ratio: float = sample_ratio
         self._user_fea_id_base = user_fea_id_base
+        self._item_features = item_features
 
     def __len__(self) -> int:
         return len(self.ratings_frame)
@@ -160,7 +163,7 @@ class DatasetV2(torch.utils.data.Dataset):
             historical_timestamps.reverse()    
 
         max_seq_len = self._padding_length - 1
-        history_length = min(len(historical_ids), max_seq_len)
+        history_length = min(len(historical_ids), max_seq_len-4) + 4
         historical_ids = _truncate_or_pad_seq(
             historical_ids,
             max_seq_len-4,
@@ -187,7 +190,41 @@ class DatasetV2(torch.utils.data.Dataset):
         #     historical_timestamps.append(0)
         # print(historical_ids, historical_ratings, historical_timestamps, target_ids, target_ratings, target_timestamps)
         
-        
+        # process item features
+        history_item_fea_ids = []
+        target_item_fea_ids = torch.zeros(
+            self._item_features.max_jagged_dimension * 3,
+            dtype=torch.int64,
+        )
+        if self._item_features is not None:
+            for item in historical_ids:
+                if item < len(self._item_features.values[0]):
+                    item_fea = torch.cat(
+                        (
+                            self._item_features.values[0][item,...],
+                            self._item_features.values[1][item,...],
+                            self._item_features.values[2][item,...],
+                        ),
+                        dim=0,
+                    )
+                else:
+                    item_fea = torch.zeros(
+                        self._item_features.max_jagged_dimension * 3,
+                        dtype=torch.int64,
+                    )
+                history_item_fea_ids.append(item_fea)
+            
+            if target_ids < len(self._item_features.values[0]):
+                target_item_fea_ids = torch.cat(
+                    (
+                        self._item_features.values[0][target_ids,...],
+                        self._item_features.values[1][target_ids,...],
+                        self._item_features.values[2][target_ids,...],
+                    ),
+                    dim=0,
+                )
+
+        history_item_fea_ids = torch.stack(history_item_fea_ids, dim=0)
     
         ret = {
             "user_id": user_id,
@@ -200,9 +237,11 @@ class DatasetV2(torch.utils.data.Dataset):
             "historical_timestamps": torch.tensor(
                 historical_timestamps, dtype=torch.int64
             ),
+            "history_item_fea_ids": history_item_fea_ids,
             "history_lengths": history_length,
             "target_ids": target_ids,
             "target_ratings": target_ratings,
             "target_timestamps": target_timestamps,
+            "target_item_fea_ids": target_item_fea_ids,
         }
         return ret

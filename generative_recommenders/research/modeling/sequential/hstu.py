@@ -591,6 +591,12 @@ class HSTU(SequentialEncoderWithLearnedSimilarityModule):
         self._linear_dropout_rate: float = linear_dropout_rate
         self._attn_dropout_rate: float = attn_dropout_rate
         self._enable_relative_attention_bias: bool = enable_relative_attention_bias
+        self._item_fea_mlp = torch.nn.Linear(
+            in_features=16 * embedding_dim * 3,
+            out_features=embedding_dim,
+        )
+        torch.nn.init.xavier_uniform_(self._item_fea_mlp.weight)
+        
         self._hstu = HSTUJagged(
             modules=[
                 SequentialTransductionUnitJagged(
@@ -641,7 +647,7 @@ class HSTU(SequentialEncoderWithLearnedSimilarityModule):
 
     def reset_params(self) -> None:
         for name, params in self.named_parameters():
-            if ("_hstu" in name) or ("_embedding_module" in name):
+            if ("_hstu" in name) or ("_embedding_module" in name) or ("_item_fea_mlp" in name):
                 if self._verbose:
                     print(f"Skipping init for {name}")
                 continue
@@ -657,6 +663,12 @@ class HSTU(SequentialEncoderWithLearnedSimilarityModule):
 
     def get_item_embeddings(self, item_ids: torch.Tensor) -> torch.Tensor:
         return self._embedding_module.get_item_embeddings(item_ids)
+
+    def get_item_fea_embeddings(self, item_fea_ids: torch.Tensor) -> torch.Tensor:
+        B, N, _ = item_fea_ids.shape
+        embeddings = self._embedding_module.get_item_fea_embeddings(item_fea_ids) # [B, N, Fea_Len, D]
+        return F.silu(self._item_fea_mlp(embeddings.view(B, N, -1)))
+        
 
     def debug_str(self) -> str:
         debug_str = (

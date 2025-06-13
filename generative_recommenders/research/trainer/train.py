@@ -312,11 +312,12 @@ def train_fn(
             eval_data_sampler.set_epoch(epoch)
         model.train()
         for row in iter(train_data_loader):
-            seq_features, target_ids, target_ratings = movielens_seq_features_from_row(
-                row,
-                device=device,
-                max_output_length=gr_output_length + 1,
-            )
+            seq_features, target_ids, target_ratings, target_item_fea_ids = \
+                movielens_seq_features_from_row(
+                    row,
+                    device=device,
+                    max_output_length=gr_output_length + 1,
+                )
 
             if (batch_id % eval_interval) == 0:
                 model.eval()
@@ -362,13 +363,27 @@ def train_fn(
                 index=seq_features.past_lengths.view(-1, 1),
                 src=target_ids.view(-1, 1),
             )
+            seq_features.past_payloads['item_fea_ids'].scatter_(
+                dim=1,
+                index=seq_features.past_lengths.view(-1, 1),
+                src=target_item_fea_ids,
+            ) # [B, N, 3*max_jagged_dimension]
 
             opt.zero_grad()
             input_embeddings = model.module.get_item_embeddings(seq_features.past_ids)
+            item_fea_embeddings = model.module.get_item_fea_embeddings(
+                seq_features.past_payloads['item_fea_ids']
+            ) # [B, N, item_embedding_dim]
+
+            fea_mask = torch.cat([torch.zeros([B,4,item_embedding_dim], dtype=torch.float32), 
+                                  torch.ones([B,N-4,item_embedding_dim],dtype=torch.float32)]
+                        , dim=1)
+            mask_item_fea_embeddings = item_fea_embeddings * fea_mask
+            input_embeddings_with_item_fea = input_embeddings + mask_item_fea_embeddings
             seq_embeddings = model(
                 past_lengths=seq_features.past_lengths,
                 past_ids=seq_features.past_ids,
-                past_embeddings=input_embeddings,
+                past_embeddings=input_embeddings_with_item_fea,
                 past_payloads=seq_features.past_payloads,
             )  # [B, X]
 
