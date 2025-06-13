@@ -375,12 +375,9 @@ def train_fn(
                 seq_features.past_payloads['item_fea_ids']
             ) # [B, N, item_embedding_dim]
 
-            fea_mask = torch.cat([torch.zeros([B,4,1], dtype=torch.float32), 
-                                  torch.ones([B,N-4,1],dtype=torch.float32)]
+            fea_mask = torch.cat([torch.zeros([B,4,1], dtype=torch.float32, device=item_fea_embeddings.device), 
+                                  torch.ones([B,N-4,1],dtype=torch.float32, device=item_fea_embeddings.device)]
                         , dim=1)
-            print("fea_mask:", fea_mask.shape)
-            print("item_fea_embeddings:", item_fea_embeddings.shape)
-            print("input_embeddings:", input_embeddings.shape)
             mask_item_fea_embeddings = item_fea_embeddings * fea_mask
             input_embeddings_with_item_fea = input_embeddings + mask_item_fea_embeddings
             seq_embeddings = model(
@@ -471,7 +468,7 @@ def train_fn(
             float_dtype=torch.bfloat16 if main_module_bf16 else None,
         )
         for eval_iter, row in enumerate(iter(eval_data_loader)):
-            seq_features, target_ids, target_ratings = movielens_seq_features_from_row(
+            seq_features, target_ids, target_ratings, _  = movielens_seq_features_from_row(
                 row, device=device, max_output_length=gr_output_length + 1
             )
             eval_dict = eval_metrics_v2_from_tensors(
