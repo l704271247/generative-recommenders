@@ -666,7 +666,7 @@ class HSTU(SequentialEncoderWithLearnedSimilarityModule):
 
     def get_item_fea_embeddings(self, item_fea_ids: torch.Tensor) -> torch.Tensor:
         B, N, _ = item_fea_ids.shape
-        embeddings = self._embedding_module.get_item_fea_embeddings(item_fea_ids) # [B, N, Fea_Len, D]
+        embeddings = self._embedding_module.get_item_embeddings(item_fea_ids) # [B, N, Fea_Len, D]
         return F.silu(self._item_fea_mlp(embeddings.view(B, N, -1)))
         
 

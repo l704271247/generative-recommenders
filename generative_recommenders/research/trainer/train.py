@@ -318,7 +318,7 @@ def train_fn(
                     device=device,
                     max_output_length=gr_output_length + 1,
                 )
-
+            print("test seq_features.past_ids: ", seq_features.past_ids.shape)
             if (batch_id % eval_interval) == 0:
                 model.eval()
 
@@ -375,8 +375,8 @@ def train_fn(
                 seq_features.past_payloads['item_fea_ids']
             ) # [B, N, item_embedding_dim]
 
-            fea_mask = torch.cat([torch.zeros([B,4,item_embedding_dim], dtype=torch.float32), 
-                                  torch.ones([B,N-4,item_embedding_dim],dtype=torch.float32)]
+            fea_mask = torch.cat([torch.zeros([B,4,1], dtype=torch.float32), 
+                                  torch.ones([B,N-4,1],dtype=torch.float32)]
                         , dim=1)
             mask_item_fea_embeddings = item_fea_embeddings * fea_mask
             input_embeddings_with_item_fea = input_embeddings + mask_item_fea_embeddings
