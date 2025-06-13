@@ -136,8 +136,6 @@ def get_reco_dataset(
     else:
         raise ValueError(f"Unknown dataset {dataset_name}")
 
-    print("test item_features:", item_features)
-
     return RecoDataset(
         max_sequence_length=max_sequence_length,
         num_unique_items=dp.expected_num_unique_items(),  # pyre-ignore [6]

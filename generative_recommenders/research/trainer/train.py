@@ -378,6 +378,9 @@ def train_fn(
             fea_mask = torch.cat([torch.zeros([B,4,1], dtype=torch.float32), 
                                   torch.ones([B,N-4,1],dtype=torch.float32)]
                         , dim=1)
+            print("fea_mask:", fea_mask.shape)
+            print("item_fea_embeddings:", item_fea_embeddings.shape)
+            print("input_embeddings:", input_embeddings.shape)
             mask_item_fea_embeddings = item_fea_embeddings * fea_mask
             input_embeddings_with_item_fea = input_embeddings + mask_item_fea_embeddings
             seq_embeddings = model(
