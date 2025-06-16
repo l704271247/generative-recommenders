@@ -105,13 +105,24 @@ def eval_metrics_v2_from_tensors(
 
     # computes ro- part exactly once.
     # pyre-fixme[29]: `Union[Tensor, Module]` is not a function.
+    input_embeddings = model.get_item_embeddings(seq_features.past_ids)
+    item_fea_embeddings = model.module.get_item_fea_embeddings(
+                seq_features.past_payloads['item_fea_ids']
+            ) # [B, N, item_embedding_dim]
+
+    fea_mask = torch.cat([torch.zeros([B,4,1], dtype=torch.float32, device=item_fea_embeddings.device), 
+                            torch.ones([B,N-4,1],dtype=torch.float32, device=item_fea_embeddings.device)]
+                , dim=1)
+    mask_item_fea_embeddings = item_fea_embeddings * fea_mask
+    input_embeddings_with_item_fea = input_embeddings + mask_item_fea_embeddings
     shared_input_embeddings = model.encode(
         past_lengths=seq_features.past_lengths,
         past_ids=seq_features.past_ids,
         # pyre-fixme[29]: `Union[Tensor, Module]` is not a function.
-        past_embeddings=model.get_item_embeddings(seq_features.past_ids),
+        past_embeddings=input_embeddings_with_item_fea,
         past_payloads=seq_features.past_payloads,
     )
+    
     if dtype is not None:
         shared_input_embeddings = shared_input_embeddings.to(dtype)
 
