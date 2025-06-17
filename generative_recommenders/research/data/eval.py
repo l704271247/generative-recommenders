@@ -95,7 +95,8 @@ def eval_metrics_v2_from_tensors(
     Returns:
         keyed metric -> list of values for each example.
     """
-    B, _ = target_ids.shape
+    # B, _ = target_ids.shape
+    B, N = seq_features.past_ids.shape
     device = target_ids.device
 
     for target_id in target_ids:
@@ -106,7 +107,7 @@ def eval_metrics_v2_from_tensors(
     # computes ro- part exactly once.
     # pyre-fixme[29]: `Union[Tensor, Module]` is not a function.
     input_embeddings = model.get_item_embeddings(seq_features.past_ids)
-    item_fea_embeddings = model.module.get_item_fea_embeddings(
+    item_fea_embeddings = model.get_item_fea_embeddings(
                 seq_features.past_payloads['item_fea_ids']
             ) # [B, N, item_embedding_dim]
 
