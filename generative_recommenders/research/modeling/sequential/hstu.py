@@ -661,13 +661,18 @@ class HSTU(SequentialEncoderWithLearnedSimilarityModule):
                 if self._verbose:
                     print(f"Failed to initialize {name}: {params.data.size()} params")
 
-    def get_item_embeddings(self, item_ids: torch.Tensor) -> torch.Tensor:
-        return self._embedding_module.get_item_embeddings(item_ids)
+    def get_embeddings(self, ids:Dict[str, torch.Tensor]) -> Dict[str, torch.Tensor]:
+        return self._embedding_module.get_embeddings(item_ids)
 
-    def get_item_fea_embeddings(self, item_fea_ids: torch.Tensor) -> torch.Tensor:
-        B, N, _ = item_fea_ids.shape
-        embeddings = self._embedding_module.get_item_embeddings(item_fea_ids) # [B, N, Fea_Len, D]
-        return F.silu(self._item_fea_mlp(embeddings.view(B, N, -1)))
+    def process_item_fea_embeddings(self, input_embeddings_dict: dict[str, torch.Tensor]) -> torch.Tensor:
+        item_ids_emb = input_embeddings_dict['movie_id']
+        genres_emb = torch.sum(input_embeddings_dict['genres'], dim=-2)
+        title_emb = torch.sum(input_embeddings_dict['title'], dim=-2)
+        year_emb = input_embeddings_dict['year']
+        item_fea_embeddings = torch.cat([genres_emb, title_emb, year_emb], dim=-1)
+        item_fea_nn = F.silu(self._item_fea_mlp(item_fea_embeddings))
+        res = item_ids_emb + item_fea_nn
+        return res
         
 
     def debug_str(self) -> str:
@@ -689,6 +694,7 @@ class HSTU(SequentialEncoderWithLearnedSimilarityModule):
         delta_x_offsets: Optional[Tuple[torch.Tensor, torch.Tensor]] = None,
         cache: Optional[List[HSTUCacheState]] = None,
         return_cache_states: bool = False,
+        user_fea_list: List[torch.Tensor] = [],
     ) -> Tuple[torch.Tensor, List[HSTUCacheState]]:
         """
         [B, N] -> [B, N, D].
@@ -702,6 +708,14 @@ class HSTU(SequentialEncoderWithLearnedSimilarityModule):
             past_ids=past_ids,
             past_embeddings=past_embeddings,
             past_payloads=past_payloads,
+        )
+
+        past_lengths, past_ids, past_embeddings, past_payloads = self.concat_user_fea(
+            past_lengths=past_lengths,
+            past_ids=past_ids,
+            past_embeddings=past_embeddings,
+            past_payloads=past_payloads,
+            user_fea_list=user_fea_list,
         )
 
         float_dtype = user_embeddings.dtype
@@ -720,6 +734,25 @@ class HSTU(SequentialEncoderWithLearnedSimilarityModule):
         )
         return self._output_postproc(user_embeddings), cached_states
 
+    def concat_user_fea(
+        self,
+        past_lengths: torch.Tensor,
+        past_ids: torch.Tensor,
+        past_embeddings: torch.Tensor,
+        past_payloads: Dict[str, torch.Tensor],
+        user_fea_list: List[torch.Tensor],
+    ) -> torch.Tensor:
+        B, N, _ = past_embeddings.size()
+        fea_num = len(user_fea_list)
+        res_past_embeddings = torch.cat(user_fea_list + [past_embeddings], dim=1)
+        res_past_ids = torch.cat([torch.zeros(B, fea_num, dtype=past_ids.dtype), past_ids], dim=1)
+        res_past_lengths = past_lengths + fea_num
+        if TIMESTAMPS_KEY in past_payloads:
+            past_payloads[TIMESTAMPS_KEY] = \
+                torch.cat([torch.zeros(B, fea_num, dtype=past_payloads[TIMESTAMPS_KEY].dtype), 
+                           past_payloads[TIMESTAMPS_KEY]], dim=1)
+        return res_past_lengths, res_past_ids, res_past_embeddings, past_payloads
+
     def forward(
         self,
         past_lengths: torch.Tensor,
@@ -727,6 +760,7 @@ class HSTU(SequentialEncoderWithLearnedSimilarityModule):
         past_embeddings: torch.Tensor,
         past_payloads: Dict[str, torch.Tensor],
         batch_id: Optional[int] = None,
+        user_fea_list: List[torch.Tensor] = [],
     ) -> torch.Tensor:
         """
         Runs the main encoder.
@@ -747,6 +781,7 @@ class HSTU(SequentialEncoderWithLearnedSimilarityModule):
             past_ids=past_ids,
             past_embeddings=past_embeddings,
             past_payloads=past_payloads,
+            user_fea_list=user_fea_list,
         )
         return encoded_embeddings
 
@@ -759,6 +794,7 @@ class HSTU(SequentialEncoderWithLearnedSimilarityModule):
         delta_x_offsets: Optional[Tuple[torch.Tensor, torch.Tensor]],
         cache: Optional[List[HSTUCacheState]],
         return_cache_states: bool,
+        user_fea_list: List[torch.Tensor] = [],
     ) -> Union[torch.Tensor, Tuple[torch.Tensor, List[HSTUCacheState]]]:
         """
         Args:
@@ -779,6 +815,7 @@ class HSTU(SequentialEncoderWithLearnedSimilarityModule):
             delta_x_offsets=delta_x_offsets,
             cache=cache,
             return_cache_states=return_cache_states,
+            user_fea_list=user_fea_list,
         )  # [B, N, D]
         current_embeddings = get_current_embeddings(
             lengths=past_lengths, encoded_embeddings=encoded_seq_embeddings
@@ -797,6 +834,7 @@ class HSTU(SequentialEncoderWithLearnedSimilarityModule):
         delta_x_offsets: Optional[Tuple[torch.Tensor, torch.Tensor]] = None,
         cache: Optional[List[HSTUCacheState]] = None,
         return_cache_states: bool = False,
+        user_fea_list: List[torch.Tensor] = [],
     ) -> Union[torch.Tensor, Tuple[torch.Tensor, List[HSTUCacheState]]]:
         """
         Runs encoder to obtain the current hidden states.
@@ -818,4 +856,5 @@ class HSTU(SequentialEncoderWithLearnedSimilarityModule):
             delta_x_offsets=delta_x_offsets,
             cache=cache,
             return_cache_states=return_cache_states,
+            user_fea_list=user_fea_list,
         )

@@ -31,6 +31,7 @@ from generative_recommenders.research.modeling.sequential.features import (
 )
 from generative_recommenders.research.rails.similarities.module import SimilarityModule
 from torch.utils.tensorboard import SummaryWriter
+from torchrec.sparse.jagged_tensor import KeyedJaggedTensor,JaggedTensor
 
 
 logging.basicConfig(stream=sys.stdout, level=logging.INFO)
@@ -56,7 +57,7 @@ def get_eval_state(
     # pyre-fixme[29]: `Union[Tensor, Module]` is not a function.
     eval_negative_embeddings = negatives_sampler.normalize_embeddings(
         # pyre-fixme[29]: `Union[Tensor, Module]` is not a function.
-        model.get_item_embeddings(eval_negatives_ids)
+        model.get_embeddings({'movie_id': eval_negatives_ids})["movie_id"]
     )
     if float_dtype is not None:
         eval_negative_embeddings = eval_negative_embeddings.to(float_dtype)
@@ -96,7 +97,6 @@ def eval_metrics_v2_from_tensors(
         keyed metric -> list of values for each example.
     """
     # B, _ = target_ids.shape
-    B, N = seq_features.past_ids.shape
     device = target_ids.device
 
     for target_id in target_ids:
@@ -106,22 +106,29 @@ def eval_metrics_v2_from_tensors(
 
     # computes ro- part exactly once.
     # pyre-fixme[29]: `Union[Tensor, Module]` is not a function.
-    input_embeddings = model.get_item_embeddings(seq_features.past_ids)
-    item_fea_embeddings = model.get_item_fea_embeddings(
-                seq_features.past_payloads['item_fea_ids']
-            ) # [B, N, item_embedding_dim]
-
-    fea_mask = torch.cat([torch.zeros([B,4,1], dtype=torch.float32, device=item_fea_embeddings.device), 
-                            torch.ones([B,N-4,1],dtype=torch.float32, device=item_fea_embeddings.device)]
-                , dim=1)
-    mask_item_fea_embeddings = item_fea_embeddings * fea_mask
-    input_embeddings_with_item_fea = input_embeddings + mask_item_fea_embeddings
+    input_ids_dict = {
+        'movie_id': seq_features.past_ids,
+        'genres': seq_features.past_payloads['historical_genres'],
+        'title': seq_features.past_payloads['historical_title'],
+        'year': seq_features.past_payloads['historical_year'],
+        'sex': seq_features.past_payloads['sex'],
+        'age_group': seq_features.past_payloads['age_group'],
+        'occupation': seq_features.past_payloads['occupation'],
+        'zip_code': seq_features.past_payloads['zip_code'],
+    }
+    input_embeddings_dict = model.get_embeddings(input_ids_dict)
+    input_embeddings_with_item_fea = model.process_item_fea_embeddings(input_embeddings_dict)
+    user_fea_list = [seq_features.past_payloads['age'],
+                     seq_features.past_payloads['gender'],
+                     seq_features.past_payloads['occupation'],
+                     seq_features.past_payloads['zip_code']]
     shared_input_embeddings = model.encode(
         past_lengths=seq_features.past_lengths,
         past_ids=seq_features.past_ids,
         # pyre-fixme[29]: `Union[Tensor, Module]` is not a function.
         past_embeddings=input_embeddings_with_item_fea,
         past_payloads=seq_features.past_payloads,
+        user_fea_list=user_fea_list,
     )
     
     if dtype is not None:

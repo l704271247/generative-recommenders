@@ -38,13 +38,24 @@ def movielens_seq_features_from_row(
 ) -> Tuple[SequentialFeatures, torch.Tensor, torch.Tensor]:
     historical_lengths = row["history_lengths"].to(device)  # [B]
     historical_ids = row["historical_ids"].to(device)  # [B, N]
-    historical_ratings = row["historical_ratings"].to(device)
-    historical_timestamps = row["historical_timestamps"].to(device)
-    historical_item_fea_ids = row["history_item_fea_ids"].to(device)  # [B, N, D]
+    historical_ratings = row["historical_ratings"].to(device)  # [B, N]
+    historical_timestamps = row["historical_timestamps"].to(device)  # [B, N]
+    historical_genres = row["historical_genres"].to(device)  # [B, N, 16]
+    historical_title = row["historical_title"].to(device)  # [B, N, 16]
+    historical_year = row["historical_year"].to(device)  # [B, N]
+    
     target_ids = row["target_ids"].to(device).unsqueeze(1)  # [B, 1]
-    target_ratings = row["target_ratings"].to(device).unsqueeze(1)
-    target_timestamps = row["target_timestamps"].to(device).unsqueeze(1)
-    target_item_fea_ids = row["target_item_fea_ids"].to(device)  # [B, D]
+    target_ratings = row["target_ratings"].to(device).unsqueeze(1)  # [B, 1]
+    target_timestamps = row["target_timestamps"].to(device).unsqueeze(1)  # [B, 1]
+    target_genres = row["target_genres"].to(device).unsqueeze(1)  # [B, 1, 16]
+    target_title = row["target_title"].to(device).unsqueeze(1)  # [B, 1, 16]
+    target_year = row["target_year"].to(device).unsqueeze(1)  # [B, 1]
+
+    sex = row["sex"].to(device).unsqueeze(1)  # [B, 1]
+    age = row["age"].to(device).unsqueeze(1)  # [B, 1]
+    occupation = row["occupation"].to(device).unsqueeze(1)  # [B, 1]
+    zip_code = row["zip_code"].to(device).unsqueeze(1)  # [B, 1]
+
     if max_output_length > 0:
         B = historical_lengths.size(0)
         historical_ids = torch.cat(
@@ -83,12 +94,34 @@ def movielens_seq_features_from_row(
             index=historical_lengths.view(-1, 1),
             src=target_timestamps.view(-1, 1),
         )
-        historical_item_fea_ids = torch.cat(
+        historical_genres = torch.cat(
             [
-                historical_item_fea_ids,
+                historical_genres,
                 torch.zeros(
-                    (B, max_output_length, historical_item_fea_ids.size(2)),
-                    dtype=historical_item_fea_ids.dtype,
+                    (B, max_output_length, historical_genres.size(2)),
+                    dtype=historical_genres.dtype,
+                    device=device,
+                ),
+            ],
+            dim=1,
+        )
+        historical_title = torch.cat(
+            [
+                historical_genres,
+                torch.zeros(
+                    (B, max_output_length, historical_title.size(2)),
+                    dtype=historical_title.dtype,
+                    device=device,
+                ),
+            ],
+            dim=1,
+        )
+        historical_year = torch.cat(
+            [
+                historical_year,
+                torch.zeros(
+                    (B, max_output_length),
+                    dtype=historical_year.dtype,
                     device=device,
                 ),
             ],
@@ -102,7 +135,16 @@ def movielens_seq_features_from_row(
         past_payloads={
             "timestamps": historical_timestamps,
             "ratings": historical_ratings,
-            "item_fea_ids": historical_item_fea_ids
+            "genres": historical_genres,
+            "title": historical_title,
+            "year": historical_year,
+            "sex": sex,
+            "age": age,
+            "occupation": occupation,
+            "zip_code": zip_code,
+            "target_genres": target_genres,
+            "target_title": target_title,
+            "target_year": target_year,
         },
     )
-    return features, target_ids, target_ratings, target_item_fea_ids
+    return features, target_ids, target_ratings

@@ -83,11 +83,23 @@ class DataProcessor:
         ratings_data_transformed.timestamps = ratings_data_transformed.timestamps.apply(
             lambda x: ",".join([str(v) for v in x])
         )
+        ratings_data_transformed.hash_genres = ratings_data_transformed.hash_genres.apply(
+            lambda x: ",".join([",".join([str(i) for i in v]) for v in x])
+        )
+        ratings_data_transformed.hash_title = ratings_data_transformed.hash_title.apply(
+            lambda x: ",".join([",".join([str(i) for i in v]) for v in x])
+        )
+        ratings_data_transformed.hash_year = ratings_data_transformed.hash_year.apply(
+            lambda x: ",".join([str(v) for v in x])
+        )
         ratings_data_transformed.rename(
             columns={
                 "item_ids": "sequence_item_ids",
                 "ratings": "sequence_ratings",
                 "timestamps": "sequence_timestamps",
+                "hash_genres": "sequence_hash_genres",
+                "hash_title": "sequence_hash_title",
+                "hash_year": "sequence_hash_year",
             },
             inplace=True,
         )
@@ -111,6 +123,8 @@ class MovielensDataProcessor(DataProcessor):
         self._download_path = download_path
         self._saved_name = saved_name
         self._convert_timestamp: bool = convert_timestamp
+        self._max_jagged_dimension = 16
+        self._max_ind_range=[63, 16383, 511]
 
     def download(self) -> None:
         if not self.file_exists(self._saved_name):
@@ -129,6 +143,9 @@ class MovielensDataProcessor(DataProcessor):
 
     def sasrec_format_csv_by_user_test(self) -> str:
         return f"tmp/{self._prefix}/sasrec_format_by_user_test.csv"
+    
+    def max_jagged_dimension(self) -> int:
+        return self._max_jagged_dimension
 
     def preprocess_rating(self) -> int:
         self.download()
@@ -185,14 +202,44 @@ class MovielensDataProcessor(DataProcessor):
                 ratings["unix_timestamp"], unit="s"
             )
 
+        
+        processed_movies = {"movie_id":[], "title":[], "genres":[], "year":[], "cleaned_title":[], 
+                            "hash_genres":[], "hash_year":[], "hash_title":[]}
+        for df_index, row in movies.iterrows():
+            movie_id = row["movie_id"]
+            titles = row["title"].split(" ")
+            genres = row["genres"].split("|")
+            year = row["year"]
+            cleaned_title = row["cleaned_title"].split(" ")
+            
+            genres_vector = [(hash(x) % self._max_ind_range[0]) + 1 for x in genres]
+            titles_vector = [(hash(x) % self._max_ind_range[1]) + 1 for x in cleaned_title]
+            years_vector = (hash(year) % self._max_ind_range[2]) + 1
+
+            genres_vector = (genres_vector + [0] * self._max_jagged_dimension)[:self._max_jagged_dimension]
+            titles_vector = (titles_vector + [0] * self._max_jagged_dimension)[:self._max_jagged_dimension]
+
+            processed_movies["movie_id"].append(movie_id)
+            processed_movies["title"].append(titles)
+            processed_movies["genres"].append(genres)
+            processed_movies["year"].append(year)
+            processed_movies["cleaned_title"].append(cleaned_title)
+            processed_movies["hash_genres"].append(genres_vector)
+            processed_movies["hash_year"].append(years_vector)
+            processed_movies["hash_title"].append(titles_vector)
+
+        processed_movies = pd.DataFrame(processed_movies)
+        ratings_join = ratings.join(
+            processed_movies.set_index("movie_id"), on="movie_id"
+        )
         # Save primary csv's
         if not os.path.exists(f"tmp/processed/{self._prefix}"):
             os.makedirs(f"tmp/processed/{self._prefix}")
         if users is not None:
             users.to_csv(f"tmp/processed/{self._prefix}/users.csv", index=False)
-        if movies is not None:
-            movies.to_csv(f"tmp/processed/{self._prefix}/movies.csv", index=False)
-        ratings.to_csv(f"tmp/processed/{self._prefix}/ratings.csv", index=False)
+        if processed_movies is not None:
+            processed_movies.to_csv(f"tmp/processed/{self._prefix}/movies.csv", index=False)
+        ratings_join.to_csv(f"tmp/processed/{self._prefix}/ratings.csv", index=False)
 
         num_unique_users = len(set(ratings["user_id"].values))
         num_unique_items = len(set(ratings["movie_id"].values))
@@ -205,6 +252,9 @@ class MovielensDataProcessor(DataProcessor):
                 "item_ids": list(ratings_group.movie_id.apply(list)),
                 "ratings": list(ratings_group.rating.apply(list)),
                 "timestamps": list(ratings_group.unix_timestamp.apply(list)),
+                "hash_genres": list(ratings_group.hash_genres.apply(list)),
+                "hash_year": list(ratings_group.hash_year.apply(list)),
+                "hash_title": list(ratings_group.hash_title.apply(list)),
             }
         )
 

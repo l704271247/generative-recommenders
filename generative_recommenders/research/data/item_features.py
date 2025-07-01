@@ -23,7 +23,6 @@ import torch
 @dataclass
 class ItemFeatures:
     num_items: int
-    item_fea_id_base: dict[str, int]
     max_jagged_dimension: int
     max_ind_range: List[int]  # [(,)] x num_features
     lengths: List[torch.Tensor]  # [(num_items,)] x num_features

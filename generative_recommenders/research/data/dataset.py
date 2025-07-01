@@ -36,8 +36,7 @@ class DatasetV2(torch.utils.data.Dataset):
         shift_id_by: int = 0,
         chronological: bool = False,
         sample_ratio: float = 1.0,
-        user_fea_id_base: Optional[Dict[str, int]] = None,
-        item_features: Optional[ItemFeatures] = None,
+        item_fea_len: int = 0,
     ) -> None:
         """
         Args:
@@ -56,8 +55,7 @@ class DatasetV2(torch.utils.data.Dataset):
         self._shift_id_by: int = shift_id_by
         self._chronological: bool = chronological
         self._sample_ratio: float = sample_ratio
-        self._user_fea_id_base = user_fea_id_base
-        self._item_features = item_features
+        self._item_fea_len: int = item_fea_len
 
     def __len__(self) -> int:
         return len(self.ratings_frame)
@@ -72,14 +70,15 @@ class DatasetV2(torch.utils.data.Dataset):
 
     def load_item(self, data) -> Dict[str, torch.Tensor]:
         user_id = data.user_id.astype(int)
-        sex = data.sex.astype(int) + self._user_fea_id_base['sex']
-        age_group = data.age_group.astype(int) + self._user_fea_id_base['age_group']
-        occupation = data.occupation.astype(int) + self._user_fea_id_base['occupation']
-        zip_code = data.zip_code.astype(int) + self._user_fea_id_base['zip_code']
+        sex = data.sex.astype(int)
+        age_group = data.age_group.astype(int)
+        occupation = data.occupation.astype(int)
+        zip_code = data.zip_code.astype(int)
 
-        def eval_as_list(x: str, ignore_last_n: int) -> List[int]:
+        def eval_as_list(x: str, ignore_last_n: int, fea_len: int=1) -> List[List[int]]:
             y = eval(x)
             y_list = [y] if type(y) == int else list(y)
+            y_list = [y_list[i:i+fea_len] for i in range(0, len(y_list), fea_len)]
             if ignore_last_n > 0:
                 # for training data creation
                 y_list = y_list[:-ignore_last_n]
@@ -87,16 +86,16 @@ class DatasetV2(torch.utils.data.Dataset):
 
         def eval_int_list(
             x: str,
-            target_len: int,
+            fea_len: int,
             ignore_last_n: int,
             shift_id_by: int,
             sampling_kept_mask: Optional[List[bool]],
-        ) -> Tuple[List[int], int]:
-            y = eval_as_list(x, ignore_last_n=ignore_last_n)
+        ) -> Tuple[List[List[int]], int]:
+            y = eval_as_list(x, ignore_last_n=ignore_last_n, fea_len=fea_len)
             if sampling_kept_mask is not None:
                 y = [x for x, kept in zip(y, sampling_kept_mask) if kept]
-            y_len = len(y)
             y.reverse()
+            y_len = len(y)
             if shift_id_by > 0:
                 y = [x + shift_id_by for x in y]
             return y, y_len
@@ -111,120 +110,142 @@ class DatasetV2(torch.utils.data.Dataset):
 
         movie_history, movie_history_len = eval_int_list(
             data.sequence_item_ids,
-            self._padding_length,
+            1,
             self._ignore_last_n,
             shift_id_by=self._shift_id_by,
             sampling_kept_mask=sampling_kept_mask,
         )
         movie_history_ratings, ratings_len = eval_int_list(
             data.sequence_ratings,
-            self._padding_length,
+            1,
             self._ignore_last_n,
             0,
             sampling_kept_mask=sampling_kept_mask,
         )
         movie_timestamps, timestamps_len = eval_int_list(
             data.sequence_timestamps,
-            self._padding_length,
+            1,
             self._ignore_last_n,
             0,
             sampling_kept_mask=sampling_kept_mask,
         )
+        movie_genres, genres_len = eval_int_list(
+            data.sequence_hash_genres,
+            self._item_fea_len,
+            self._ignore_last_n,
+            0,
+            sampling_kept_mask=sampling_kept_mask,
+        )
+        movie_title, title_len = eval_int_list(
+            data.sequence_hash_title,
+            self._item_fea_len,
+            self._ignore_last_n,
+            0,
+            sampling_kept_mask=sampling_kept_mask,
+        )
+        movie_year, year_len = eval_int_list(
+            data.sequence_hash_year,
+            1,
+            self._ignore_last_n,
+            0,
+            sampling_kept_mask=sampling_kept_mask,
+        )
+
         assert (
             movie_history_len == timestamps_len
         ), f"history len {movie_history_len} differs from timestamp len {timestamps_len}."
         assert (
             movie_history_len == ratings_len
         ), f"history len {movie_history_len} differs from ratings len {ratings_len}."
+        assert (
+            movie_history_len  == genres_len
+        ), f"history len {movie_history_len} differs from genres len {genres_len}."
+        assert (
+            movie_history_len  == title_len
+        ), f"history len {movie_history_len} differs from title len {title_len}."
+        assert (
+            movie_history_len == year_len
+        ), f"history len {movie_history_len} differs from year len {year_len}."
 
         def _truncate_or_pad_seq(
-            y: List[int], target_len: int, chronological: bool
+            y: List[List[int]], target_len: int, fea_len: int, chronological: bool
         ) -> List[int]:
             y_len = len(y)
             if y_len < target_len:
-                y = y + [0] * (target_len - y_len)
+                y = y + [[0] * fea_len] * (target_len - y_len)
             else:
                 if not chronological:
                     y = y[:target_len]
                 else:
                     y = y[-target_len:]
-            assert len(y) == target_len
+            assert len(y) == (target_len)
+            y = [item for sublist in y for item in sublist]
             return y
 
         historical_ids = movie_history[1:]
         historical_ratings = movie_history_ratings[1:]
         historical_timestamps = movie_timestamps[1:]
+        historical_genres = movie_genres[1:]
+        historical_title = movie_title[1:]
+        historical_year = movie_year[1:]
         target_ids = movie_history[0]
         target_ratings = movie_history_ratings[0]
         target_timestamps = movie_timestamps[0]
+        target_genres = movie_genres[0]
+        target_title = movie_title[0]
+        target_year = movie_year[0]
         if self._chronological:
             historical_ids.reverse()
             historical_ratings.reverse()
-            historical_timestamps.reverse()    
+            historical_timestamps.reverse()
+            historical_genres.reverse()
+            historical_title.reverse()
+            historical_year.reverse() 
 
         max_seq_len = self._padding_length - 1
-        history_length = min(len(historical_ids), max_seq_len-4) + 4
+        history_length = min(len(historical_ids), max_seq_len)
         historical_ids = _truncate_or_pad_seq(
             historical_ids,
-            max_seq_len-4,
+            max_seq_len,
+            self._item_fea_len,
             self._chronological,
         )
-        historical_ids = [sex, age_group, occupation, zip_code] + historical_ids
         historical_ratings = _truncate_or_pad_seq(
             historical_ratings,
-            max_seq_len-4,
+            max_seq_len,
+            self._item_fea_len,
             self._chronological,
         )
-        historical_ratings =  [0] * 4 + historical_ratings
-
         historical_timestamps = _truncate_or_pad_seq(
             historical_timestamps,
-            max_seq_len-4,
+            max_seq_len,
+            self._item_fea_len,
             self._chronological,
         )
-        historical_timestamps = [0] * 4 + historical_timestamps
+        historical_genres = _truncate_or_pad_seq(
+            historical_genres,
+            max_seq_len,
+            self._item_fea_len,
+            self._chronological,
+        )
+        historical_title = _truncate_or_pad_seq(
+            historical_title,
+            max_seq_len,
+            self._item_fea_len,
+            self._chronological,
+        )
+        historical_year = _truncate_or_pad_seq(
+            historical_year,
+            max_seq_len,
+            self._item_fea_len,
+            self._chronological,
+        )
         # moved to features.py
         # if self._chronological:
         #     historical_ids.append(0)
         #     historical_ratings.append(0)
         #     historical_timestamps.append(0)
         # print(historical_ids, historical_ratings, historical_timestamps, target_ids, target_ratings, target_timestamps)
-        
-        # process item features
-        history_item_fea_ids = []
-        target_item_fea_ids = torch.zeros(
-            self._item_features.max_jagged_dimension * 3,
-            dtype=torch.int64,
-        )
-        if self._item_features is not None:
-            for item in historical_ids:
-                if item < len(self._item_features.values[0]):
-                    item_fea = torch.cat(
-                        (
-                            self._item_features.values[0][item,...],
-                            self._item_features.values[1][item,...],
-                            self._item_features.values[2][item,...],
-                        ),
-                        dim=0,
-                    )
-                else:
-                    item_fea = torch.zeros(
-                        self._item_features.max_jagged_dimension * 3,
-                        dtype=torch.int64,
-                    )
-                history_item_fea_ids.append(item_fea)
-            
-            if target_ids < len(self._item_features.values[0]):
-                target_item_fea_ids = torch.cat(
-                    (
-                        self._item_features.values[0][target_ids,...],
-                        self._item_features.values[1][target_ids,...],
-                        self._item_features.values[2][target_ids,...],
-                    ),
-                    dim=0,
-                )
-
-        history_item_fea_ids = torch.stack(history_item_fea_ids, dim=0)
     
         ret = {
             "user_id": user_id,
@@ -234,14 +255,16 @@ class DatasetV2(torch.utils.data.Dataset):
             "zip_code": zip_code,
             "historical_ids": torch.tensor(historical_ids, dtype=torch.int64),
             "historical_ratings": torch.tensor(historical_ratings, dtype=torch.int64),
-            "historical_timestamps": torch.tensor(
-                historical_timestamps, dtype=torch.int64
-            ),
-            "history_item_fea_ids": history_item_fea_ids,
+            "historical_timestamps": torch.tensor(historical_timestamps, dtype=torch.int64),
+            "historical_genres": torch.tensor(historical_genres, dtype=torch.int64).view(-1, self._item_fea_len),
+            "historical_title": torch.tensor(historical_title, dtype=torch.int64).view(-1, self._item_fea_len), # view(-1, self._item_fea_len) for mult
+            "historical_year": torch.tensor(historical_year, dtype=torch.int64),
             "history_lengths": history_length,
             "target_ids": target_ids,
             "target_ratings": target_ratings,
             "target_timestamps": target_timestamps,
-            "target_item_fea_ids": target_item_fea_ids,
+            "target_genres": torch.tensor(target_genres, dtype=torch.int64),
+            "target_title": torch.tensor(target_title, dtype=torch.int64),
+            "target_year": torch.tensor(target_year, dtype=torch.int64),
         }
         return ret

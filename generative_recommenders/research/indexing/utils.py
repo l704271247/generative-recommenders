@@ -25,7 +25,6 @@ from generative_recommenders.research.rails.indexing.mol_top_k import MoLBruteFo
 
 def get_top_k_module(
     top_k_method: str,
-    model: torch.nn.Module,
     item_embeddings: torch.Tensor,
     item_ids: torch.Tensor,
 ) -> TopKModule:

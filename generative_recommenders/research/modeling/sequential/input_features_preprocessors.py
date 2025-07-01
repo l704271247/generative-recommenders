@@ -58,7 +58,6 @@ class LearnablePositionalEmbeddingInputFeaturesPreprocessor(
         )
         self._dropout_rate: float = dropout_rate
         self._emb_dropout = torch.nn.Dropout(p=dropout_rate)
-        self._user_fea_len = user_fea_len
         self.reset_state()
 
     def debug_str(self) -> str:

@@ -18,6 +18,10 @@ import abc
 
 import torch
 
+from torchrec.modules.embedding_configs import EmbeddingConfig
+from torchrec.modules.embedding_modules import EmbeddingCollection
+from torchrec.sparse.jagged_tensor import KeyedJaggedTensor,JaggedTensor
+
 from generative_recommenders.research.modeling.initialization import truncated_normal
 
 
@@ -107,3 +111,49 @@ class CategoricalEmbeddingModule(EmbeddingModule):
     @property
     def item_embedding_dim(self) -> int:
         return self._item_embedding_dim
+
+
+
+class MultiEmbeddingModule(EmbeddingModule):
+    def __init__(
+        self,
+        conf: EmbeddingConfig,
+        embedding_dim: int,
+    ) -> None:
+        super().__init__()
+
+        self._embedding_dim: int = embedding_dim
+        self._conf = conf
+        self._tables = EmbeddingCollection(
+            tables=list(conf.values()),
+            need_indices=False,
+            device=device,
+        )
+        self.reset_params()
+
+    def debug_str(self) -> str:
+        return f"MultiEmbeddingModule_d{self._embedding_dim}"
+
+    def reset_params(self) -> None:
+        for name, params in self.named_parameters():
+            if "_emb_table" in name:
+                print(
+                    f"Initialize {name} as truncated normal: {params.data.size()} params"
+                )
+                truncated_normal(params, mean=0.0, std=0.02)
+            else:
+                print(f"Skipping initializing params {name} - not configured")
+
+    def get_embeddings(self, ids: Dict[str, torch.Tensor]) -> Dict[str, torch.Tensor]:
+        JaggedTensor_ids = {}
+        for key, val in ids.items():
+            JaggedTensor_ids[key] = JaggedTensor.from_dense([val])
+        raw_res = self._tables(KeyedJaggedTensor.from_jt_dict(JaggedTensor_ids))
+        res = {}
+        for key, val in raw_res.items():
+            res[key] = JaggedTensor.to_dense(val)[0]
+        return res
+
+    @property
+    def embedding_dim(self) -> int:
+        return self._embedding_dim

@@ -20,10 +20,12 @@ from typing import List, Tuple
 
 import torch
 import torch.nn.functional as F
+from torchrec.modules.embedding_modules import EmbeddingCollection
 
 from generative_recommenders.research.rails.similarities.module import SimilarityModule
 
 from torch.utils.checkpoint import checkpoint
+from torchrec import KeyedJaggedTensor
 
 
 class NegativesSampler(torch.nn.Module):
@@ -74,7 +76,7 @@ class LocalNegativesSampler(NegativesSampler):
     def __init__(
         self,
         num_items: int,
-        item_emb: torch.nn.Embedding,
+        item_emb: EmbeddingCollection,
         all_item_ids: List[int],
         l2_norm: bool,
         l2_norm_eps: float,
@@ -118,7 +120,11 @@ class LocalNegativesSampler(NegativesSampler):
             device=positive_ids.device,
         )
         sampled_ids = self._all_item_ids[sampled_offsets.view(-1)].reshape(output_shape)
-        return sampled_ids, self.normalize_embeddings(self._item_emb(sampled_ids))
+        sampled_ids_for_search = KeyedJaggedTensor.from_jt_dict(
+            {'movie_id': sampled_ids}
+        )
+        sampled_emb = self._item_emb(sampled_ids_for_search)['movie_id']
+        return sampled_ids, self.normalize_embeddings(sampled_emb)
 
 
 class InBatchNegativesSampler(NegativesSampler):

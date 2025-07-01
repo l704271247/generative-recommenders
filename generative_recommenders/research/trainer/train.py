@@ -43,8 +43,7 @@ from generative_recommenders.research.modeling.sequential.autoregressive_losses 
     LocalNegativesSampler,
 )
 from generative_recommenders.research.modeling.sequential.embedding_modules import (
-    EmbeddingModule,
-    LocalEmbeddingModule,
+    MultiEmbeddingModule,
 )
 from generative_recommenders.research.modeling.sequential.encoder_utils import (
     get_sequential_encoder,
@@ -66,6 +65,7 @@ from generative_recommenders.research.modeling.similarity_utils import (
     get_similarity_function,
 )
 from generative_recommenders.research.trainer.data_loader import create_data_loader
+from generative_recommenders.research.trainer.utils import get_embedding_conf
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.utils.tensorboard import SummaryWriter
 
@@ -109,7 +109,6 @@ def train_fn(
     eval_batch_size: int = 128,
     eval_user_max_batch_size: Optional[int] = None,
     main_module: str = "SASRec",
-    main_module_bf16: bool = False,
     dropout_rate: float = 0.2,
     user_embedding_norm: str = "l2_norm",
     sampling_strategy: str = "in-batch",
@@ -128,22 +127,15 @@ def train_fn(
     full_eval_every_n: int = 1,
     save_ckpt_every_n: int = 1000,
     partial_eval_num_iters: int = 32,
-    embedding_module_type: str = "local",
-    item_embedding_dim: int = 240,
+    embedding_dim: int = 256,
     interaction_module_type: str = "",
     gr_output_length: int = 10,
     l2_norm_eps: float = 1e-6,
     enable_tf32: bool = False,
-    random_seed: int = 42,
-    u_context_max_len: int =4,
+    random_seed: int = 42
 ) -> None:
     # to enable more deterministic results.
     random.seed(random_seed)
-    torch.backends.cuda.matmul.allow_tf32 = enable_tf32
-    torch.backends.cudnn.allow_tf32 = enable_tf32
-    logging.info(f"cuda.matmul.allow_tf32: {enable_tf32}")
-    logging.info(f"cudnn.allow_tf32: {enable_tf32}")
-    logging.info(f"Training model on rank {rank}.")
     setup(rank, world_size, master_port)
 
     dataset = get_reco_dataset(
@@ -171,45 +163,41 @@ def train_fn(
     )
 
     model_debug_str = main_module
-    if embedding_module_type == "local":
-        embedding_module: EmbeddingModule = LocalEmbeddingModule(
-            num_items=dataset.max_id,
-            item_embedding_dim=item_embedding_dim,
-        )
-    else:
-        raise ValueError(f"Unknown embedding_module_type {embedding_module_type}")
+    embedding_conf = get_embedding_conf(embedding_dim=embedding_dim)
+    embedding_module = MultiEmbeddingModule(
+        conf=embedding_conf,
+        embedding_dim=embedding_dim
+    )
     model_debug_str += f"-{embedding_module.debug_str()}"
 
     interaction_module, interaction_module_debug_str = get_similarity_function(
         module_type=interaction_module_type,
-        query_embedding_dim=item_embedding_dim,
-        item_embedding_dim=item_embedding_dim,
+        query_embedding_dim=embedding_dim,
+        item_embedding_dim=embedding_dim,
     )
-
     assert (
         user_embedding_norm == "l2_norm" or user_embedding_norm == "layer_norm"
     ), f"Not implemented for {user_embedding_norm}"
     output_postproc_module = (
         L2NormEmbeddingPostprocessor(
-            embedding_dim=item_embedding_dim,
+            embedding_dim=embedding_dim,
             eps=1e-6,
         )
         if user_embedding_norm == "l2_norm"
         else LayerNormEmbeddingPostprocessor(
-            embedding_dim=item_embedding_dim,
+            embedding_dim=embedding_dim,
             eps=1e-6,
         )
     )
     input_preproc_module = LearnablePositionalEmbeddingInputFeaturesPreprocessor(
         max_sequence_len=dataset.max_sequence_length + gr_output_length + 1,
-        embedding_dim=item_embedding_dim,
-        dropout_rate=dropout_rate,
-        user_fea_len=u_context_max_len,
+        embedding_dim=embedding_dim,
+        dropout_rate=dropout_rate
     )
 
     model = get_sequential_encoder(
         module_type=main_module,
-        max_sequence_length=dataset.max_sequence_length,
+        max_sequence_length=dataset.max_sequence_length + 4,
         max_output_length=gr_output_length + 1,
         embedding_module=embedding_module,
         interaction_module=interaction_module,
@@ -254,7 +242,7 @@ def train_fn(
     elif sampling_strategy == "local":
         negatives_sampler = LocalNegativesSampler(
             num_items=dataset.max_item_id,
-            item_emb=model._embedding_module._item_emb,
+            item_emb=model._embedding_module._tables,
             all_item_ids=dataset.all_item_ids,
             l2_norm=item_l2_norm,
             l2_norm_eps=l2_norm_eps,
@@ -264,13 +252,12 @@ def train_fn(
     sampling_debug_str = negatives_sampler.debug_str()
 
     # Creates model and moves it to GPU with id rank
-    device = rank
-    if main_module_bf16:
-        model = model.to(torch.bfloat16)
+    # device = rank
+    device = 'cpu'
     model = model.to(device)
     ar_loss = ar_loss.to(device)
     negatives_sampler = negatives_sampler.to(device)
-    model = DDP(model, device_ids=[rank], broadcast_buffers=False)
+    model = DDP(model) #  , device_ids=[rank], broadcast_buffers=False)
 
     # TODO: wrap in create_optimizer.
     opt = torch.optim.AdamW(
@@ -314,7 +301,7 @@ def train_fn(
             eval_data_sampler.set_epoch(epoch)
         model.train()
         for row in iter(train_data_loader):
-            seq_features, target_ids, target_ratings, target_item_fea_ids = \
+            seq_features, target_ids, target_ratings = \
                 movielens_seq_features_from_row(
                     row,
                     device=device,
@@ -330,12 +317,11 @@ def train_fn(
                     negatives_sampler=negatives_sampler,
                     top_k_module_fn=lambda item_embeddings, item_ids: get_top_k_module(
                         top_k_method=top_k_method,
-                        model=model.module,
                         item_embeddings=item_embeddings,
                         item_ids=item_ids,
                     ),
                     device=device,
-                    float_dtype=torch.bfloat16 if main_module_bf16 else None,
+                    float_dtype=None,
                 )
                 eval_dict = eval_metrics_v2_from_tensors(
                     eval_state,
@@ -344,7 +330,7 @@ def train_fn(
                     target_ids=target_ids,
                     target_ratings=target_ratings,
                     user_max_batch_size=eval_user_max_batch_size,
-                    dtype=torch.bfloat16 if main_module_bf16 else None,
+                    dtype=None,
                 )
                 add_to_summary_writer(
                     writer, batch_id, eval_dict, prefix="eval", world_size=world_size
@@ -365,28 +351,30 @@ def train_fn(
                 index=seq_features.past_lengths.view(-1, 1),
                 src=target_ids.view(-1, 1),
             )
-            seq_features.past_payloads['item_fea_ids'].scatter_(
-                dim=1,
-                index=seq_features.past_lengths.view(-1, 1, 1).repeat([1,1,3*16]),
-                src=target_item_fea_ids.view(-1,1,3*16),
-            ) # [B, N, 3*max_jagged_dimension]
 
             opt.zero_grad()
-            input_embeddings = model.module.get_item_embeddings(seq_features.past_ids)
-            item_fea_embeddings = model.module.get_item_fea_embeddings(
-                seq_features.past_payloads['item_fea_ids']
-            ) # [B, N, item_embedding_dim]
-
-            fea_mask = torch.cat([torch.zeros([B,4,1], dtype=torch.float32, device=item_fea_embeddings.device), 
-                                  torch.ones([B,N-4,1],dtype=torch.float32, device=item_fea_embeddings.device)]
-                        , dim=1)
-            mask_item_fea_embeddings = item_fea_embeddings * fea_mask
-            input_embeddings_with_item_fea = input_embeddings + mask_item_fea_embeddings
+            input_ids_dict = {
+                'movie_id': seq_features.past_ids,
+                'genres': seq_features.past_payloads['historical_genres'],
+                'title': seq_features.past_payloads['historical_title'],
+                'year': seq_features.past_payloads['historical_year'],
+                'sex': seq_features.past_payloads['sex'],
+                'age_group': seq_features.past_payloads['age_group'],
+                'occupation': seq_features.past_payloads['occupation'],
+                'zip_code': seq_features.past_payloads['zip_code'],
+            }
+            input_embeddings_dict = model.get_embeddings(input_ids_dict)
+            input_embeddings_with_item_fea = model.process_item_fea_embeddings(input_embeddings_dict)
+            user_fea_list = [seq_features.past_payloads['age'],
+                            seq_features.past_payloads['gender'],
+                            seq_features.past_payloads['occupation'],
+                            seq_features.past_payloads['zip_code']]
             seq_embeddings = model(
                 past_lengths=seq_features.past_lengths,
                 past_ids=seq_features.past_ids,
                 past_embeddings=input_embeddings_with_item_fea,
                 past_payloads=seq_features.past_payloads,
+                user_fea_list=user_fea_list
             )  # [B, X]
 
             supervision_ids = seq_features.past_ids
@@ -467,10 +455,10 @@ def train_fn(
                 item_ids=item_ids,
             ),
             device=device,
-            float_dtype=torch.bfloat16 if main_module_bf16 else None,
+            float_dtype=None,
         )
         for eval_iter, row in enumerate(iter(eval_data_loader)):
-            seq_features, target_ids, target_ratings, _  = movielens_seq_features_from_row(
+            seq_features, target_ids, target_ratings  = movielens_seq_features_from_row(
                 row, device=device, max_output_length=gr_output_length + 1
             )
             eval_dict = eval_metrics_v2_from_tensors(
@@ -480,7 +468,7 @@ def train_fn(
                 target_ids=target_ids,
                 target_ratings=target_ratings,
                 user_max_batch_size=eval_user_max_batch_size,
-                dtype=torch.bfloat16 if main_module_bf16 else None,
+                dtype=None,
             )
 
             if eval_dict_all is None:
