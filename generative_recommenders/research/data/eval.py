@@ -108,9 +108,9 @@ def eval_metrics_v2_from_tensors(
     # pyre-fixme[29]: `Union[Tensor, Module]` is not a function.
     input_ids_dict = {
         'movie_id': seq_features.past_ids,
-        'genres': seq_features.past_payloads['historical_genres'],
-        'title': seq_features.past_payloads['historical_title'],
-        'year': seq_features.past_payloads['historical_year'],
+        'genres': seq_features.past_payloads['genres'],
+        'title': seq_features.past_payloads['title'],
+        'year': seq_features.past_payloads['year'],
         'sex': seq_features.past_payloads['sex'],
         'age_group': seq_features.past_payloads['age_group'],
         'occupation': seq_features.past_payloads['occupation'],
@@ -118,10 +118,10 @@ def eval_metrics_v2_from_tensors(
     }
     input_embeddings_dict = model.get_embeddings(input_ids_dict)
     input_embeddings_with_item_fea = model.process_item_fea_embeddings(input_embeddings_dict)
-    user_fea_list = [seq_features.past_payloads['age'],
-                     seq_features.past_payloads['gender'],
-                     seq_features.past_payloads['occupation'],
-                     seq_features.past_payloads['zip_code']]
+    user_fea_list = [input_embeddings_dict['age_group'],
+                     input_embeddings_dict['sex'],
+                     input_embeddings_dict['occupation'],
+                     input_embeddings_dict['zip_code']]
     shared_input_embeddings = model.encode(
         past_lengths=seq_features.past_lengths,
         past_ids=seq_features.past_ids,

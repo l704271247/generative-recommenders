@@ -121,6 +121,7 @@ class RelativeBucketedTimeAndPositionBasedBias(RelativeAttentionBiasModule):
         """
         B = all_timestamps.size(0)
         N = self._max_seq_len
+        print("test1:", all_timestamps.size())
         t = F.pad(self._pos_w[: 2 * N - 1], [0, N]).repeat(N)
         t = t[..., :-N].reshape(1, N, 3 * N - 2)
         r = (2 * N - 1) // 2
@@ -555,7 +556,6 @@ class HSTU(SequentialEncoderWithLearnedSimilarityModule):
         self,
         max_sequence_len: int,
         max_output_len: int,
-        embedding_dim: int,
         num_blocks: int,
         num_heads: int,
         linear_dim: int,
@@ -574,11 +574,10 @@ class HSTU(SequentialEncoderWithLearnedSimilarityModule):
         verbose: bool = True,
     ) -> None:
         super().__init__(ndp_module=similarity_module)
-
-        self._embedding_dim: int = embedding_dim
-        self._item_embedding_dim: int = embedding_module.item_embedding_dim
+        self._embedding_dim: int = embedding_module.embedding_dim
         self._max_sequence_length: int = max_sequence_len
-        self._embedding_module: EmbeddingModule = embedding_module
+        # self._embedding_module: EmbeddingModule = embedding_module
+        self._embedding_module = embedding_module
         self._input_features_preproc: InputFeaturesPreprocessorModule = (
             input_features_preproc_module
         )
@@ -592,11 +591,11 @@ class HSTU(SequentialEncoderWithLearnedSimilarityModule):
         self._attn_dropout_rate: float = attn_dropout_rate
         self._enable_relative_attention_bias: bool = enable_relative_attention_bias
         self._item_fea_mlp = torch.nn.Linear(
-            in_features=16 * embedding_dim * 3,
-            out_features=embedding_dim,
+            in_features=self._embedding_dim * 3,
+            out_features=self._embedding_dim,
         )
         torch.nn.init.xavier_uniform_(self._item_fea_mlp.weight)
-        
+        self._max_output_len: int = max_output_len
         self._hstu = HSTUJagged(
             modules=[
                 SequentialTransductionUnitJagged(
@@ -662,7 +661,7 @@ class HSTU(SequentialEncoderWithLearnedSimilarityModule):
                     print(f"Failed to initialize {name}: {params.data.size()} params")
 
     def get_embeddings(self, ids:Dict[str, torch.Tensor]) -> Dict[str, torch.Tensor]:
-        return self._embedding_module.get_embeddings(item_ids)
+        return self._embedding_module.get_embeddings(ids)
 
     def process_item_fea_embeddings(self, input_embeddings_dict: dict[str, torch.Tensor]) -> torch.Tensor:
         item_ids_emb = input_embeddings_dict['movie_id']
@@ -703,30 +702,25 @@ class HSTU(SequentialEncoderWithLearnedSimilarityModule):
         float_dtype = past_embeddings.dtype
         B, N, _ = past_embeddings.size()
 
-        past_lengths, user_embeddings, _ = self._input_features_preproc(
+        past_lengths, past_embeddings, _ = self._input_features_preproc(
             past_lengths=past_lengths,
             past_ids=past_ids,
             past_embeddings=past_embeddings,
             past_payloads=past_payloads,
         )
 
-        past_lengths, past_ids, past_embeddings, past_payloads = self.concat_user_fea(
+        past_lengths, past_ids, past_embeddings, res_past_timestamps = self.concat_user_fea(
             past_lengths=past_lengths,
             past_ids=past_ids,
             past_embeddings=past_embeddings,
             past_payloads=past_payloads,
             user_fea_list=user_fea_list,
         )
-
-        float_dtype = user_embeddings.dtype
+        float_dtype = past_embeddings.dtype
         user_embeddings, cached_states = self._hstu(
-            x=user_embeddings,
+            x=past_embeddings,
             x_offsets=torch.ops.fbgemm.asynchronous_complete_cumsum(past_lengths),
-            all_timestamps=(
-                past_payloads[TIMESTAMPS_KEY]
-                if TIMESTAMPS_KEY in past_payloads
-                else None
-            ),
+            all_timestamps=res_past_timestamps,
             invalid_attn_mask=1.0 - self._attn_mask.to(float_dtype),
             delta_x_offsets=delta_x_offsets,
             cache=cache,
@@ -748,10 +742,12 @@ class HSTU(SequentialEncoderWithLearnedSimilarityModule):
         res_past_ids = torch.cat([torch.zeros(B, fea_num, dtype=past_ids.dtype), past_ids], dim=1)
         res_past_lengths = past_lengths + fea_num
         if TIMESTAMPS_KEY in past_payloads:
-            past_payloads[TIMESTAMPS_KEY] = \
+            res_past_timestamps = \
                 torch.cat([torch.zeros(B, fea_num, dtype=past_payloads[TIMESTAMPS_KEY].dtype), 
                            past_payloads[TIMESTAMPS_KEY]], dim=1)
-        return res_past_lengths, res_past_ids, res_past_embeddings, past_payloads
+        else:
+            res_past_timestamps = None
+        return res_past_lengths, res_past_ids, res_past_embeddings, res_past_timestamps
 
     def forward(
         self,

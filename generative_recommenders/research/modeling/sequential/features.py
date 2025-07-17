@@ -43,16 +43,15 @@ def movielens_seq_features_from_row(
     historical_genres = row["historical_genres"].to(device)  # [B, N, 16]
     historical_title = row["historical_title"].to(device)  # [B, N, 16]
     historical_year = row["historical_year"].to(device)  # [B, N]
-    
-    target_ids = row["target_ids"].to(device).unsqueeze(1)  # [B, 1]
-    target_ratings = row["target_ratings"].to(device).unsqueeze(1)  # [B, 1]
-    target_timestamps = row["target_timestamps"].to(device).unsqueeze(1)  # [B, 1]
+    target_ids = row["target_ids"].to(device)  # [B, 1]
+    target_ratings = row["target_ratings"].to(device)  # [B, 1]
+    target_timestamps = row["target_timestamps"].to(device)  # [B, 1]
     target_genres = row["target_genres"].to(device).unsqueeze(1)  # [B, 1, 16]
     target_title = row["target_title"].to(device).unsqueeze(1)  # [B, 1, 16]
-    target_year = row["target_year"].to(device).unsqueeze(1)  # [B, 1]
+    target_year = row["target_year"].to(device)  # [B, 1]
 
     sex = row["sex"].to(device).unsqueeze(1)  # [B, 1]
-    age = row["age"].to(device).unsqueeze(1)  # [B, 1]
+    age_group = row["age_group"].to(device).unsqueeze(1)  # [B, 1]
     occupation = row["occupation"].to(device).unsqueeze(1)  # [B, 1]
     zip_code = row["zip_code"].to(device).unsqueeze(1)  # [B, 1]
 
@@ -107,7 +106,7 @@ def movielens_seq_features_from_row(
         )
         historical_title = torch.cat(
             [
-                historical_genres,
+                historical_title,
                 torch.zeros(
                     (B, max_output_length, historical_title.size(2)),
                     dtype=historical_title.dtype,
@@ -139,7 +138,7 @@ def movielens_seq_features_from_row(
             "title": historical_title,
             "year": historical_year,
             "sex": sex,
-            "age": age,
+            "age_group": age_group,
             "occupation": occupation,
             "zip_code": zip_code,
             "target_genres": target_genres,

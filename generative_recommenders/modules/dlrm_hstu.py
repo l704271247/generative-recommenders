@@ -48,7 +48,7 @@ from generative_recommenders.ops.layer_norm import LayerNorm, SwishLayerNorm
 from torch.autograd.profiler import record_function
 from torchrec import KeyedJaggedTensor
 from torchrec.modules.embedding_configs import EmbeddingConfig
-from torchrec.modules.embedding_modules import EmbeddingCollection
+from generative_recommenders.research.trainer.utils import MyEmbeddingCollection
 
 logger: logging.Logger = logging.getLogger(__name__)
 
@@ -127,7 +127,7 @@ class DlrmHSTU(HammerModule):
         self._hstu_configs = hstu_configs
         set_static_max_seq_lens([self._hstu_configs.max_seq_len])
 
-        self._embedding_collection = EmbeddingCollection(
+        self._embedding_collection = MyEmbeddingCollection(
             tables=list(embedding_tables.values()),
             need_indices=False,
             device=torch.device("meta"),

@@ -245,7 +245,7 @@ class MovielensDataProcessor(DataProcessor):
         num_unique_items = len(set(ratings["movie_id"].values))
 
         # SASRec version
-        ratings_group = ratings.sort_values(by=["unix_timestamp"]).groupby("user_id")
+        ratings_group = ratings_join.sort_values(by=["unix_timestamp"]).groupby("user_id")
         seq_ratings_data = pd.DataFrame(
             data={
                 "user_id": list(ratings_group.groups.keys()),

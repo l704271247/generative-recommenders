@@ -47,7 +47,6 @@ class LearnablePositionalEmbeddingInputFeaturesPreprocessor(
         max_sequence_len: int,
         embedding_dim: int,
         dropout_rate: float,
-        user_fea_len: int
     ) -> None:
         super().__init__()
 

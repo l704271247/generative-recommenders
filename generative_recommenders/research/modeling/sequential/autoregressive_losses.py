@@ -23,7 +23,9 @@ import torch.nn.functional as F
 from torchrec.modules.embedding_modules import EmbeddingCollection
 
 from generative_recommenders.research.rails.similarities.module import SimilarityModule
-
+from generative_recommenders.research.modeling.sequential.embedding_modules import (
+    MultiEmbeddingModule,
+)
 from torch.utils.checkpoint import checkpoint
 from torchrec import KeyedJaggedTensor
 
@@ -76,7 +78,7 @@ class LocalNegativesSampler(NegativesSampler):
     def __init__(
         self,
         num_items: int,
-        item_emb: EmbeddingCollection,
+        item_emb: MultiEmbeddingModule,
         all_item_ids: List[int],
         l2_norm: bool,
         l2_norm_eps: float,
@@ -84,7 +86,7 @@ class LocalNegativesSampler(NegativesSampler):
         super().__init__(l2_norm=l2_norm, l2_norm_eps=l2_norm_eps)
 
         self._num_items: int = len(all_item_ids)
-        self._item_emb: torch.nn.Embedding = item_emb
+        self._item_emb: MultiEmbeddingModule = item_emb
         self.register_buffer("_all_item_ids", torch.tensor(all_item_ids))
 
     def debug_str(self) -> str:
@@ -120,10 +122,7 @@ class LocalNegativesSampler(NegativesSampler):
             device=positive_ids.device,
         )
         sampled_ids = self._all_item_ids[sampled_offsets.view(-1)].reshape(output_shape)
-        sampled_ids_for_search = KeyedJaggedTensor.from_jt_dict(
-            {'movie_id': sampled_ids}
-        )
-        sampled_emb = self._item_emb(sampled_ids_for_search)['movie_id']
+        sampled_emb = self._item_emb.get_embeddings({'movie_id': sampled_ids})['movie_id']
         return sampled_ids, self.normalize_embeddings(sampled_emb)
 
 

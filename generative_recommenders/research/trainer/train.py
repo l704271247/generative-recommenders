@@ -242,7 +242,7 @@ def train_fn(
     elif sampling_strategy == "local":
         negatives_sampler = LocalNegativesSampler(
             num_items=dataset.max_item_id,
-            item_emb=model._embedding_module._tables,
+            item_emb=model._embedding_module,
             all_item_ids=dataset.all_item_ids,
             l2_norm=item_l2_norm,
             l2_norm_eps=l2_norm_eps,
@@ -355,20 +355,21 @@ def train_fn(
             opt.zero_grad()
             input_ids_dict = {
                 'movie_id': seq_features.past_ids,
-                'genres': seq_features.past_payloads['historical_genres'],
-                'title': seq_features.past_payloads['historical_title'],
-                'year': seq_features.past_payloads['historical_year'],
+                'genres': seq_features.past_payloads['genres'],
+                'title': seq_features.past_payloads['title'],
+                'year': seq_features.past_payloads['year'],
                 'sex': seq_features.past_payloads['sex'],
                 'age_group': seq_features.past_payloads['age_group'],
                 'occupation': seq_features.past_payloads['occupation'],
                 'zip_code': seq_features.past_payloads['zip_code'],
             }
-            input_embeddings_dict = model.get_embeddings(input_ids_dict)
-            input_embeddings_with_item_fea = model.process_item_fea_embeddings(input_embeddings_dict)
-            user_fea_list = [seq_features.past_payloads['age'],
-                            seq_features.past_payloads['gender'],
-                            seq_features.past_payloads['occupation'],
-                            seq_features.past_payloads['zip_code']]
+            input_embeddings_dict = model.module.get_embeddings(input_ids_dict)
+            input_embeddings_with_item_fea = model.module.process_item_fea_embeddings(input_embeddings_dict)
+            user_fea_list = [input_embeddings_dict['age_group'],
+                             input_embeddings_dict['sex'],
+                             input_embeddings_dict['occupation'],
+                             input_embeddings_dict['zip_code']]
+            print(seq_features.past_payloads['timestamps'].size())
             seq_embeddings = model(
                 past_lengths=seq_features.past_lengths,
                 past_ids=seq_features.past_ids,
@@ -390,14 +391,13 @@ def train_fn(
             else:
                 # pyre-fixme[16]: `InBatchNegativesSampler` has no attribute
                 #  `_item_emb`.
-                negatives_sampler._item_emb = model.module._embedding_module._item_emb
-            ar_mask = torch.cat([torch.tensor([False] * 4, device=supervision_ids.device).repeat([B,1])
-                                 ,(supervision_ids[:, 5:] != 0)], dim=1)
+                negatives_sampler._item_emb = model.module._embedding_module
+            ar_mask = (supervision_ids[:, 1:] != 0)
             loss, aux_losses = ar_loss(
                 lengths=seq_features.past_lengths,  # [B],
-                output_embeddings=seq_embeddings[:, :-1, :],  # [B, N-1, D]
+                output_embeddings=seq_embeddings[:, len(user_fea_list):-1, :],  # [B, N-1, D]
                 supervision_ids=supervision_ids[:, 1:],  # [B, N-1]
-                supervision_embeddings=input_embeddings[:, 1:, :],  # [B, N - 1, D]
+                supervision_embeddings=input_embeddings_dict['movie_id'][:, 1:, :],  # [B, N - 1, D]
                 supervision_weights=ar_mask.float(),
                 negatives_sampler=negatives_sampler,
                 **seq_features.past_payloads,
@@ -450,7 +450,6 @@ def train_fn(
             negatives_sampler=negatives_sampler,
             top_k_module_fn=lambda item_embeddings, item_ids: get_top_k_module(
                 top_k_method=top_k_method,
-                model=model.module,
                 item_embeddings=item_embeddings,
                 item_ids=item_ids,
             ),

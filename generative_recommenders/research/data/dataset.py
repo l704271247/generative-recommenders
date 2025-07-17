@@ -207,19 +207,19 @@ class DatasetV2(torch.utils.data.Dataset):
         historical_ids = _truncate_or_pad_seq(
             historical_ids,
             max_seq_len,
-            self._item_fea_len,
+            1,
             self._chronological,
         )
         historical_ratings = _truncate_or_pad_seq(
             historical_ratings,
             max_seq_len,
-            self._item_fea_len,
+            1,
             self._chronological,
         )
         historical_timestamps = _truncate_or_pad_seq(
             historical_timestamps,
             max_seq_len,
-            self._item_fea_len,
+            1,
             self._chronological,
         )
         historical_genres = _truncate_or_pad_seq(
@@ -237,7 +237,7 @@ class DatasetV2(torch.utils.data.Dataset):
         historical_year = _truncate_or_pad_seq(
             historical_year,
             max_seq_len,
-            self._item_fea_len,
+            1,
             self._chronological,
         )
         # moved to features.py
@@ -246,7 +246,6 @@ class DatasetV2(torch.utils.data.Dataset):
         #     historical_ratings.append(0)
         #     historical_timestamps.append(0)
         # print(historical_ids, historical_ratings, historical_timestamps, target_ids, target_ratings, target_timestamps)
-    
         ret = {
             "user_id": user_id,
             "sex": sex,
@@ -260,9 +259,9 @@ class DatasetV2(torch.utils.data.Dataset):
             "historical_title": torch.tensor(historical_title, dtype=torch.int64).view(-1, self._item_fea_len), # view(-1, self._item_fea_len) for mult
             "historical_year": torch.tensor(historical_year, dtype=torch.int64),
             "history_lengths": history_length,
-            "target_ids": target_ids,
-            "target_ratings": target_ratings,
-            "target_timestamps": target_timestamps,
+            "target_ids": torch.tensor(target_ids, dtype=torch.int64),
+            "target_ratings": torch.tensor(target_ratings, dtype=torch.int64),
+            "target_timestamps": torch.tensor(target_timestamps, dtype=torch.int64),
             "target_genres": torch.tensor(target_genres, dtype=torch.int64),
             "target_title": torch.tensor(target_title, dtype=torch.int64),
             "target_year": torch.tensor(target_year, dtype=torch.int64),

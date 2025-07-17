@@ -15,15 +15,14 @@
 # pyre-unsafe
 
 import abc
-
+from typing import Dict, List, Optional, Tuple, Union
 import torch
 
-from torchrec.modules.embedding_configs import EmbeddingConfig
 from torchrec.modules.embedding_modules import EmbeddingCollection
+from torchrec.modules.embedding_configs import EmbeddingConfig
 from torchrec.sparse.jagged_tensor import KeyedJaggedTensor,JaggedTensor
 
 from generative_recommenders.research.modeling.initialization import truncated_normal
-
 
 class EmbeddingModule(torch.nn.Module):
     @abc.abstractmethod
@@ -113,18 +112,55 @@ class CategoricalEmbeddingModule(EmbeddingModule):
         return self._item_embedding_dim
 
 
+class MyEmbeddingCollection(EmbeddingCollection):
+
+    def forward(
+        self,
+        jt_dict: Dict[str, JaggedTensor],
+    ) -> Dict[str, JaggedTensor]:
+        """
+        Run the EmbeddingBagCollection forward pass. This method takes in a `KeyedJaggedTensor`
+        and returns a `Dict[str, JaggedTensor]`, which is the result of the individual embeddings for each feature.
+
+        Args:
+            features (KeyedJaggedTensor): KJT of form [F X B X L].
+
+        Returns:
+            Dict[str, JaggedTensor]
+        """
+
+        feature_embeddings: Dict[str, JaggedTensor] = {}
+        for i, emb_module in enumerate(self.embeddings.values()):
+            feature_names = self._feature_names[i]
+            embedding_names = self._embedding_names_by_table[i]
+            for j, embedding_name in enumerate(embedding_names):
+                feature_name = feature_names[j]
+                if feature_name not in jt_dict:
+                    continue
+                f = jt_dict[feature_name]
+                lookup = emb_module(
+                    input=f.values(),
+                ).float()
+                feature_embeddings[embedding_name] = JaggedTensor(
+                    values=lookup,
+                    lengths=f.lengths(),
+                    weights=f.values() if self._need_indices else None,
+                )
+        return feature_embeddings
+
 
 class MultiEmbeddingModule(EmbeddingModule):
     def __init__(
         self,
         conf: EmbeddingConfig,
         embedding_dim: int,
+        device="cpu"
     ) -> None:
         super().__init__()
 
         self._embedding_dim: int = embedding_dim
         self._conf = conf
-        self._tables = EmbeddingCollection(
+        self._tables = MyEmbeddingCollection(
             tables=list(conf.values()),
             need_indices=False,
             device=device,
@@ -144,11 +180,11 @@ class MultiEmbeddingModule(EmbeddingModule):
             else:
                 print(f"Skipping initializing params {name} - not configured")
 
-    def get_embeddings(self, ids: Dict[str, torch.Tensor]) -> Dict[str, torch.Tensor]:
-        JaggedTensor_ids = {}
+    def get_embeddings(self, ids: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
+        jt_dict = {}
         for key, val in ids.items():
-            JaggedTensor_ids[key] = JaggedTensor.from_dense([val])
-        raw_res = self._tables(KeyedJaggedTensor.from_jt_dict(JaggedTensor_ids))
+            jt_dict[key] = JaggedTensor.from_dense([val])
+        raw_res = self._tables(jt_dict)
         res = {}
         for key, val in raw_res.items():
             res[key] = JaggedTensor.to_dense(val)[0]
