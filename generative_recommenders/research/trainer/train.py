@@ -49,7 +49,7 @@ from generative_recommenders.research.modeling.sequential.encoder_utils import (
     get_sequential_encoder,
 )
 from generative_recommenders.research.modeling.sequential.features import (
-    movielens_seq_features_from_row,
+    sid_seq_features_from_row,
 )
 from generative_recommenders.research.modeling.sequential.input_features_preprocessors import (
     LearnablePositionalEmbeddingInputFeaturesPreprocessor,
@@ -132,7 +132,8 @@ def train_fn(
     gr_output_length: int = 10,
     l2_norm_eps: float = 1e-6,
     enable_tf32: bool = False,
-    random_seed: int = 42
+    random_seed: int = 42,
+    min_positive_rating: int = 300
 ) -> None:
     # to enable more deterministic results.
     random.seed(random_seed)
@@ -163,7 +164,10 @@ def train_fn(
     )
 
     model_debug_str = main_module
-    embedding_conf = get_embedding_conf(embedding_dim=embedding_dim)
+    embedding_conf = get_embedding_conf(
+        dataset_name=dataset_name,
+        embedding_dim=embedding_dim
+    )
     embedding_module = MultiEmbeddingModule(
         conf=embedding_conf,
         embedding_dim=embedding_dim
@@ -197,7 +201,7 @@ def train_fn(
 
     model = get_sequential_encoder(
         module_type=main_module,
-        max_sequence_length=dataset.max_sequence_length + 4,
+        max_sequence_length=dataset.max_sequence_length + dataset.ufea_num,
         max_output_length=gr_output_length + 1,
         embedding_module=embedding_module,
         interaction_module=interaction_module,
@@ -302,7 +306,8 @@ def train_fn(
         model.train()
         for row in iter(train_data_loader):
             seq_features, target_ids, target_ratings = \
-                movielens_seq_features_from_row(
+                sid_seq_features_from_row(
+                    dataset.feature_conf,
                     row,
                     device=device,
                     max_output_length=gr_output_length + 1,
@@ -322,15 +327,17 @@ def train_fn(
                     ),
                     device=device,
                     float_dtype=None,
+                    target_key=seq_features.target_key
                 )
                 eval_dict = eval_metrics_v2_from_tensors(
                     eval_state,
                     model.module,
                     seq_features,
                     target_ids=target_ids,
+                    min_positive_rating=min_positive_rating,
                     target_ratings=target_ratings,
                     user_max_batch_size=eval_user_max_batch_size,
-                    dtype=None,
+                    dtype=None
                 )
                 add_to_summary_writer(
                     writer, batch_id, eval_dict, prefix="eval", world_size=world_size
@@ -353,29 +360,19 @@ def train_fn(
             )
 
             opt.zero_grad()
-            input_ids_dict = {
-                'movie_id': seq_features.past_ids,
-                'genres': seq_features.past_payloads['genres'],
-                'title': seq_features.past_payloads['title'],
-                'year': seq_features.past_payloads['year'],
-                'sex': seq_features.past_payloads['sex'],
-                'age_group': seq_features.past_payloads['age_group'],
-                'occupation': seq_features.past_payloads['occupation'],
-                'zip_code': seq_features.past_payloads['zip_code'],
-            }
+
+            input_ids_dict = {}
+            for fea in (seq_features.item_emb_key+seq_features.user_emb_key):
+                input_ids_dict[fea] = seq_features.past_payloads[fea]
             input_embeddings_dict = model.module.get_embeddings(input_ids_dict)
-            input_embeddings_with_item_fea = model.module.process_item_fea_embeddings(input_embeddings_dict)
-            user_fea_list = [input_embeddings_dict['age_group'],
-                             input_embeddings_dict['sex'],
-                             input_embeddings_dict['occupation'],
-                             input_embeddings_dict['zip_code']]
-            print(seq_features.past_payloads['timestamps'].size())
+            input_embeddings_with_item_fea, user_fea_emb_list = model.module.process_embeddings(input_embeddings_dict, seq_features)
+            print(seq_features.past_payloads['ts'].size())
             seq_embeddings = model(
                 past_lengths=seq_features.past_lengths,
                 past_ids=seq_features.past_ids,
                 past_embeddings=input_embeddings_with_item_fea,
                 past_payloads=seq_features.past_payloads,
-                user_fea_list=user_fea_list
+                user_fea_list=user_fea_emb_list
             )  # [B, X]
 
             supervision_ids = seq_features.past_ids
@@ -393,11 +390,12 @@ def train_fn(
                 #  `_item_emb`.
                 negatives_sampler._item_emb = model.module._embedding_module
             ar_mask = (supervision_ids[:, 1:] != 0)
+            print(f"jefferylao test {input_embeddings_dict[seq_features.target_key]}" )
             loss, aux_losses = ar_loss(
                 lengths=seq_features.past_lengths,  # [B],
-                output_embeddings=seq_embeddings[:, len(user_fea_list):-1, :],  # [B, N-1, D]
+                output_embeddings=seq_embeddings[:, len(user_fea_emb_list):-1, :],  # [B, N-1, D]
                 supervision_ids=supervision_ids[:, 1:],  # [B, N-1]
-                supervision_embeddings=input_embeddings_dict['movie_id'][:, 1:, :],  # [B, N - 1, D]
+                supervision_embeddings=input_embeddings_dict[seq_features.target_key][:, 1:, :],  # [B, N - 1, D]
                 supervision_weights=ar_mask.float(),
                 negatives_sampler=negatives_sampler,
                 **seq_features.past_payloads,
@@ -457,7 +455,7 @@ def train_fn(
             float_dtype=None,
         )
         for eval_iter, row in enumerate(iter(eval_data_loader)):
-            seq_features, target_ids, target_ratings  = movielens_seq_features_from_row(
+            seq_features, target_ids, target_ratings  = sid_seq_features_from_row(
                 row, device=device, max_output_length=gr_output_length + 1
             )
             eval_dict = eval_metrics_v2_from_tensors(
@@ -465,6 +463,7 @@ def train_fn(
                 model.module,
                 seq_features,
                 target_ids=target_ids,
+                min_positive_rating=min_positive_rating,
                 target_ratings=target_ratings,
                 user_max_batch_size=eval_user_max_batch_size,
                 dtype=None,

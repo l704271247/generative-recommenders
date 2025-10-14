@@ -18,6 +18,7 @@ import logging
 import sys
 from dataclasses import dataclass
 from typing import Callable, Dict, List, Optional, Set, Union
+from typing import Any
 
 import torch
 import torch.distributed as dist
@@ -51,13 +52,14 @@ def get_eval_state(
     top_k_module_fn: Callable[[torch.Tensor, torch.Tensor], TopKModule],
     device: int,
     float_dtype: Optional[torch.dtype] = None,
+    target_key: str = 'sid',
 ) -> EvalState:
     # Exhaustively eval all items (incl. seen ids).
     eval_negatives_ids = torch.as_tensor(all_item_ids).to(device).unsqueeze(0)  # [1, X]
     # pyre-fixme[29]: `Union[Tensor, Module]` is not a function.
     eval_negative_embeddings = negatives_sampler.normalize_embeddings(
         # pyre-fixme[29]: `Union[Tensor, Module]` is not a function.
-        model.get_embeddings({'movie_id': eval_negatives_ids})["movie_id"]
+        model.get_embeddings({target_key: eval_negatives_ids})[target_key]
     )
     if float_dtype is not None:
         eval_negative_embeddings = eval_negative_embeddings.to(float_dtype)
@@ -83,7 +85,7 @@ def eval_metrics_v2_from_tensors(
     epoch: Optional[str] = None,
     filter_invalid_ids: bool = True,
     user_max_batch_size: Optional[int] = None,
-    dtype: Optional[torch.dtype] = None,
+    dtype: Optional[torch.dtype] = None
 ) -> Dict[str, Union[float, torch.Tensor]]:
     """
     Args:
@@ -104,31 +106,22 @@ def eval_metrics_v2_from_tensors(
         if target_id not in eval_state.all_item_ids:
             print(f"missing target_id {target_id}")
 
-    # computes ro- part exactly once.
-    # pyre-fixme[29]: `Union[Tensor, Module]` is not a function.
-    input_ids_dict = {
-        'movie_id': seq_features.past_ids,
-        'genres': seq_features.past_payloads['genres'],
-        'title': seq_features.past_payloads['title'],
-        'year': seq_features.past_payloads['year'],
-        'sex': seq_features.past_payloads['sex'],
-        'age_group': seq_features.past_payloads['age_group'],
-        'occupation': seq_features.past_payloads['occupation'],
-        'zip_code': seq_features.past_payloads['zip_code'],
-    }
+    input_ids_dict = {}
+    for fea in (seq_features.item_emb_key+seq_features.user_emb_key):
+        input_ids_dict[fea] = seq_features.past_payloads[fea]
+    
     input_embeddings_dict = model.get_embeddings(input_ids_dict)
-    input_embeddings_with_item_fea = model.process_item_fea_embeddings(input_embeddings_dict)
-    user_fea_list = [input_embeddings_dict['age_group'],
-                     input_embeddings_dict['sex'],
-                     input_embeddings_dict['occupation'],
-                     input_embeddings_dict['zip_code']]
+
+    input_embeddings_with_item_fea, user_fea_emb_list = \
+        model.process_embeddings(input_embeddings_dict, seq_features)
+
     shared_input_embeddings = model.encode(
         past_lengths=seq_features.past_lengths,
         past_ids=seq_features.past_ids,
         # pyre-fixme[29]: `Union[Tensor, Module]` is not a function.
         past_embeddings=input_embeddings_with_item_fea,
         past_payloads=seq_features.past_payloads,
-        user_fea_list=user_fea_list,
+        user_fea_list=user_fea_emb_list,
     )
     
     if dtype is not None:

@@ -44,8 +44,11 @@ from generative_recommenders.research.modeling.similarity_module import (
 )
 from generative_recommenders.research.rails.similarities.module import SimilarityModule
 
+from generative_recommenders.research.modeling.sequential.features import (
+    SequentialFeatures,
+)
 
-TIMESTAMPS_KEY = "timestamps"
+TIMESTAMPS_KEY = "ts"
 
 
 class RelativeAttentionBiasModule(torch.nn.Module):
@@ -663,15 +666,31 @@ class HSTU(SequentialEncoderWithLearnedSimilarityModule):
     def get_embeddings(self, ids:Dict[str, torch.Tensor]) -> Dict[str, torch.Tensor]:
         return self._embedding_module.get_embeddings(ids)
 
-    def process_item_fea_embeddings(self, input_embeddings_dict: dict[str, torch.Tensor]) -> torch.Tensor:
-        item_ids_emb = input_embeddings_dict['movie_id']
-        genres_emb = torch.sum(input_embeddings_dict['genres'], dim=-2)
-        title_emb = torch.sum(input_embeddings_dict['title'], dim=-2)
-        year_emb = input_embeddings_dict['year']
-        item_fea_embeddings = torch.cat([genres_emb, title_emb, year_emb], dim=-1)
-        item_fea_nn = F.silu(self._item_fea_mlp(item_fea_embeddings))
-        res = item_ids_emb + item_fea_nn
-        return res
+    def process_embeddings( \
+        self,
+        input_embeddings_dict: dict[str, torch.Tensor],
+        seq_features: SequentialFeatures
+        ) -> torch.Tensor:
+
+        item_side_emb_list = [] 
+        for fea in seq_features.item_emb_key:
+            if fea == seq_features.target_key:
+                continue
+            item_side_emb_list.append(torch.sum(input_embeddings_dict[fea], dim=-2))
+        for fea in seq_features.item_rv_key:
+            item_side_emb_list.append(seq_features.past_payloads[fea])
+        
+        user_fea_emb_list = []
+        for fea in seq_features.user_emb_key:
+            user_fea_emb_list.append(orch.sum(input_embeddings_dict[fea], dim=-2))
+        for fea in seq_features.user_rv_key:
+            user_fea_emb_list.append(seq_features.past_payloads[fea])
+
+
+        item_side_emb = torch.cat(item_side_emb_list, dim=-1)
+        item_fea_nn = F.silu(self._item_fea_mlp(item_side_emb))
+        item_processed_emb = torch.sum(input_embeddings_dict[seq_features.target_key], dim=-2) + item_fea_nn
+        return item_processed_emb, user_fea_emb_list
         
 
     def debug_str(self) -> str:

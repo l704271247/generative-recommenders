@@ -37,6 +37,7 @@ class DatasetV2(torch.utils.data.Dataset):
         chronological: bool = False,
         sample_ratio: float = 1.0,
         item_fea_len: int = 0,
+        feature_conf = None
     ) -> None:
         """
         Args:
@@ -46,7 +47,7 @@ class DatasetV2(torch.utils.data.Dataset):
 
         self.ratings_frame: pd.DataFrame = pd.read_csv(
             ratings_file,
-            delimiter=",",
+            sep="\t",
             # iterator=True,
         )
         self._padding_length: int = padding_length
@@ -56,6 +57,7 @@ class DatasetV2(torch.utils.data.Dataset):
         self._chronological: bool = chronological
         self._sample_ratio: float = sample_ratio
         self._item_fea_len: int = item_fea_len
+        self._feature_conf = feature_conf
 
     def __len__(self) -> int:
         return len(self.ratings_frame)
@@ -68,12 +70,34 @@ class DatasetV2(torch.utils.data.Dataset):
         self._cache[idx] = sample
         return sample
 
+    def str2dtype(self, x):
+        if x.lower() == 'int':
+            return int
+        elif x.lower() == 'float':
+            return float
+        else:
+            return str
+
+    def conf2torchdtype(self, conf):
+        if conf.get('need_code', False):
+            return torch.int64
+        elif conf.get('dtype', 'int') == 'int':
+            return torch.int64
+        elif conf.get('dtype', 'int') == 'float':
+            return torch.float32
+        else:
+            return torch.int64
+
     def load_item(self, data) -> Dict[str, torch.Tensor]:
-        user_id = data.user_id.astype(int)
-        sex = data.sex.astype(int)
-        age_group = data.age_group.astype(int)
-        occupation = data.occupation.astype(int)
-        zip_code = data.zip_code.astype(int)
+        ufea = {}
+        ufea_conf = self._feature_conf['user_fea']
+        for fea in ufea_conf:
+            ufea[fea] = data[fea].astype(self.str2dtype(ufea_conf[fea].get('dtype', 'int'))).view(-1, ufea_conf[fea].get('fea_len', 1))
+        
+        ifea = {}
+        ifea_conf = self._feature_conf['item_fea']
+        for fea in ifea_conf:
+            ifea[fea] = data[fea].astype(self.str2dtype(ifea_conf[fea].get('dtype', 'int')))
 
         def eval_as_list(x: str, ignore_last_n: int, fea_len: int=1) -> List[List[int]]:
             y = eval(x)
@@ -101,71 +125,28 @@ class DatasetV2(torch.utils.data.Dataset):
             return y, y_len
 
         if self._sample_ratio < 1.0:
-            raw_length = len(eval_as_list(data.sequence_item_ids, self._ignore_last_n))
+            raw_length = len(eval_as_list(data['sid'], self._ignore_last_n))
             sampling_kept_mask = (
                 torch.rand((raw_length,), dtype=torch.float32) < self._sample_ratio
             ).tolist()
         else:
             sampling_kept_mask = None
 
-        movie_history, movie_history_len = eval_int_list(
-            data.sequence_item_ids,
-            1,
-            self._ignore_last_n,
-            shift_id_by=self._shift_id_by,
-            sampling_kept_mask=sampling_kept_mask,
-        )
-        movie_history_ratings, ratings_len = eval_int_list(
-            data.sequence_ratings,
-            1,
-            self._ignore_last_n,
-            0,
-            sampling_kept_mask=sampling_kept_mask,
-        )
-        movie_timestamps, timestamps_len = eval_int_list(
-            data.sequence_timestamps,
-            1,
-            self._ignore_last_n,
-            0,
-            sampling_kept_mask=sampling_kept_mask,
-        )
-        movie_genres, genres_len = eval_int_list(
-            data.sequence_hash_genres,
-            self._item_fea_len,
-            self._ignore_last_n,
-            0,
-            sampling_kept_mask=sampling_kept_mask,
-        )
-        movie_title, title_len = eval_int_list(
-            data.sequence_hash_title,
-            self._item_fea_len,
-            self._ignore_last_n,
-            0,
-            sampling_kept_mask=sampling_kept_mask,
-        )
-        movie_year, year_len = eval_int_list(
-            data.sequence_hash_year,
-            1,
-            self._ignore_last_n,
-            0,
-            sampling_kept_mask=sampling_kept_mask,
-        )
+        sampled_ifea = {}
+        ifea_lens = {}
+        for k,v in ifea.items():
+            seq, seq_len = eval_int_list(
+                x=v, 
+                fea_len=ifea_conf[k].get('fea_len', 1), 
+                ignore_last_n=self._ignore_last_n,
+                shift_id_by=self._shift_id_by,
+                sampling_kept_mask=sampling_kept_mask,
+            )
+            sampled_ifea[k] = seq
+            ifea_lens[k] = seq_len
 
-        assert (
-            movie_history_len == timestamps_len
-        ), f"history len {movie_history_len} differs from timestamp len {timestamps_len}."
-        assert (
-            movie_history_len == ratings_len
-        ), f"history len {movie_history_len} differs from ratings len {ratings_len}."
-        assert (
-            movie_history_len  == genres_len
-        ), f"history len {movie_history_len} differs from genres len {genres_len}."
-        assert (
-            movie_history_len  == title_len
-        ), f"history len {movie_history_len} differs from title len {title_len}."
-        assert (
-            movie_history_len == year_len
-        ), f"history len {movie_history_len} differs from year len {year_len}."
+        for k,v in ifea_lens.items():
+            assert v == ifea_lens['sid'], f"feature {k} len {v} differs from sid len {ifea_lens['sid']}."
 
         def _truncate_or_pad_seq(
             y: List[List[int]], target_len: int, fea_len: int, chronological: bool
@@ -182,62 +163,18 @@ class DatasetV2(torch.utils.data.Dataset):
             y = [item for sublist in y for item in sublist]
             return y
 
-        historical_ids = movie_history[1:]
-        historical_ratings = movie_history_ratings[1:]
-        historical_timestamps = movie_timestamps[1:]
-        historical_genres = movie_genres[1:]
-        historical_title = movie_title[1:]
-        historical_year = movie_year[1:]
-        target_ids = movie_history[0]
-        target_ratings = movie_history_ratings[0]
-        target_timestamps = movie_timestamps[0]
-        target_genres = movie_genres[0]
-        target_title = movie_title[0]
-        target_year = movie_year[0]
-        if self._chronological:
-            historical_ids.reverse()
-            historical_ratings.reverse()
-            historical_timestamps.reverse()
-            historical_genres.reverse()
-            historical_title.reverse()
-            historical_year.reverse() 
 
         max_seq_len = self._padding_length - 1
-        history_length = min(len(historical_ids), max_seq_len)
-        historical_ids = _truncate_or_pad_seq(
-            historical_ids,
+        history_length = min(ifea_lens['sid'] - 1, max_seq_len)
+        historical_ifea = {}
+        target_ifea = {}
+        for k,v in sampled_ifea.items():
+            target_ifea['target_' + k] = v[0]
+            tmp_historical_ifea = v[:0:-1] if self._chronological else v[1:]
+            historical_ifea['historical_' + k] = _truncate_or_pad_seq(
+            tmp_historical_ifea,
             max_seq_len,
-            1,
-            self._chronological,
-        )
-        historical_ratings = _truncate_or_pad_seq(
-            historical_ratings,
-            max_seq_len,
-            1,
-            self._chronological,
-        )
-        historical_timestamps = _truncate_or_pad_seq(
-            historical_timestamps,
-            max_seq_len,
-            1,
-            self._chronological,
-        )
-        historical_genres = _truncate_or_pad_seq(
-            historical_genres,
-            max_seq_len,
-            self._item_fea_len,
-            self._chronological,
-        )
-        historical_title = _truncate_or_pad_seq(
-            historical_title,
-            max_seq_len,
-            self._item_fea_len,
-            self._chronological,
-        )
-        historical_year = _truncate_or_pad_seq(
-            historical_year,
-            max_seq_len,
-            1,
+            ifea_conf[k].get('fea_len', 1),
             self._chronological,
         )
         # moved to features.py
@@ -246,24 +183,12 @@ class DatasetV2(torch.utils.data.Dataset):
         #     historical_ratings.append(0)
         #     historical_timestamps.append(0)
         # print(historical_ids, historical_ratings, historical_timestamps, target_ids, target_ratings, target_timestamps)
-        ret = {
-            "user_id": user_id,
-            "sex": sex,
-            "age_group": age_group,
-            "occupation": occupation,
-            "zip_code": zip_code,
-            "historical_ids": torch.tensor(historical_ids, dtype=torch.int64),
-            "historical_ratings": torch.tensor(historical_ratings, dtype=torch.int64),
-            "historical_timestamps": torch.tensor(historical_timestamps, dtype=torch.int64),
-            "historical_genres": torch.tensor(historical_genres, dtype=torch.int64).view(-1, self._item_fea_len),
-            "historical_title": torch.tensor(historical_title, dtype=torch.int64).view(-1, self._item_fea_len), # view(-1, self._item_fea_len) for mult
-            "historical_year": torch.tensor(historical_year, dtype=torch.int64),
-            "history_lengths": history_length,
-            "target_ids": torch.tensor(target_ids, dtype=torch.int64),
-            "target_ratings": torch.tensor(target_ratings, dtype=torch.int64),
-            "target_timestamps": torch.tensor(target_timestamps, dtype=torch.int64),
-            "target_genres": torch.tensor(target_genres, dtype=torch.int64),
-            "target_title": torch.tensor(target_title, dtype=torch.int64),
-            "target_year": torch.tensor(target_year, dtype=torch.int64),
-        }
+        ret = {}
+        ret.update(ufea)
+        for k,v in historical_ifea.items():
+            ret[k] = torch.tensor(v, dtype=self.conf2torchdtype(ifea_conf[k])).view(-1, ifea_conf[k].get('fea_len', 1))
+        for k,v in target_ifea.items():
+            ret[k] = torch.tensor(v, dtype=self.conf2torchdtype(ifea_conf[k])).view(-1, ifea_conf[k].get('fea_len', 1))
+        ret['history_length'] = history_length
+
         return ret

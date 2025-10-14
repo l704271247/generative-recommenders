@@ -1,0 +1,45 @@
+user_fea:
+    uid:
+        is_fea: false
+        need_code: false
+        fea_len: 1
+        embedding_table: uid_emb_table
+    age:
+        is_fea: true
+        need_code: true
+        fea_len: 1
+        embedding_table: age_emb_table
+    sex:
+        is_fea: true
+        need_code: true
+        fea_len: 1
+        embedding_table: sex_emb_table
+
+item_fea:
+    sid:
+        is_fea: true
+        need_code: true
+        is_target: true
+        fea_len: 1
+        embedding_table: sid_emb_table
+    sid_sec_type:  
+        is_fea: true
+        need_code: true
+        fea_len: 1
+        embedding_table: sid_sec_type_emb_table
+    ts:
+        is_fea: false
+        need_code: false
+        dtype: int
+        fea_len: 1
+    stay_dr:
+        is_fea: false
+        need_code: false
+        is_rating: true
+        dtype: int
+        fea_len: 1
+    voice_dr:
+        is_fea: false
+        need_code: false
+        dtype: int
+        fea_len: 1

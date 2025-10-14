@@ -27,6 +27,9 @@ from zipfile import ZipFile
 import numpy as np
 
 import pandas as pd
+import yaml
+
+from run_fractal_expansion import rescale
 
 
 logging.basicConfig(stream=sys.stdout, level=logging.INFO)
@@ -302,11 +305,114 @@ class MovielensDataProcessor(DataProcessor):
 
         return num_unique_items
 
+
+
+class SidSeqDataProcessor:
+    def __init__(
+        self,
+        base_dir: str,
+        input_data: str,
+        feature_conf: str,
+        output_data: str
+    ) -> None:
+        self._base_dir = base_dir
+        self._input_data = input_data
+        self._output_data = output_data
+        self._codebook = {}
+        self._expected_max_item_id = None
+        self._max_jagged_dimension = 1 # 多值特征的最大个数
+        self._ufea_set = set()
+        self._ifea_set = set()
+        # 读取配置文件
+        with open(feature_conf, "r") as ifn:
+            self._feature_conf = yaml.safe_load(ifn)
+        
+        for fea in self._feature_conf['user_fea']:
+            if self._feature_conf['user_fea'][fea].get('is_fea', False):
+                self._ufea_set.add(fea)
+            if not self._feature_conf['user_fea'][fea].get('need_code', False):
+                continue
+            self._codebook[fea] = "%s/%s_codebook.txt" %(self._base_dir, fea)
+
+        for fea in self._feature_conf['item_fea']:
+            if self._feature_conf['item_fea'][fea].get('is_fea', False):
+                self._ifea_set.add(fea)
+            if not self._feature_conf['item_fea'][fea].get('need_code', False):
+                continue
+            self._codebook[fea] = "%s/%s_codebook.txt" %(self._base_dir, fea)
+
+
+    def ufea_num(self) -> int:
+        return len(self._ufea_set)
+
+    def ifea_num(self) -> int:
+        return len(self._ifea_set)
+
+    def is_fea(self, fea: str) -> bool:
+        return fea in self._ufea_set or fea in self._ifea_set
+
+    def output_format_csv(self)-> str:
+        return self._output_data
+
+    def max_jagged_dimension(self) -> int:
+        return self._max_jagged_dimension
+
+    def feature_conf(self):
+        return self._feature_conf
+
+    def expected_max_item_id(self) -> int:
+        if self._expected_max_item_id is None:
+            with open(self._codebook['sid'], 'r') as ifn:
+                cnt = 0
+                for line in ifn:
+                    cnt += 1
+                self._expected_max_item_id = cnt - 1  # 最大的item_id是cnt-1
+        return self._expected_max_item_id
+
+    def get_fea_unique_num(self, fea: str) -> int:
+        if fea in self._codebook:
+            with open(self._codebook[fea], 'r') as ifn:
+                cnt = 0
+                for line in ifn:
+                    cnt += 1
+                return cnt
+        return -1
+
+    def processed_data(self):
+        # 读取原始数据
+        raw_data = pd.read_csv(self._input_data, '\t')
+        user_fea = self._feature_conf['user_fea']
+        for fea in user_fea:
+            if not user_fea[fea].get('need_code', False):
+                continue
+            tmp_fun = pd.Categorical(raw_data[fea])
+            raw_data[fea] = tmp_fun.codes
+            codebook = pd.DataFrame({'value':tmp_fun.categories, 'code':range(len(tmp_fun.categories))})
+            codebook.to_csv(self._codebook[fea], index=False, sep='\t')
+
+        item_fea = self._feature_conf['item_fea']
+        for fea in item_fea:
+            if not item_fea[fea].get('need_code', False):
+                continue
+            tmp_fun = pd.Categorical(raw_data[fea])
+            raw_data[fea] = tmp_fun.codes
+            codebook = pd.DataFrame({'value':tmp_fun.categories, 'code':range(len(tmp_fun.categories))})
+            codebook.to_csv(self._codebook[fea], index=False, sep='\t')
+
+        group_data = raw_data.sort_values(by=["ts"],ascending=True).groupby("uid")
+        processed_data = pd.DataFrame()
+        for fea in user_fea:
+            processed_data[fea] = group_data[fea].apply(lambda x: x.iloc[0])
+        for fea in item_fea:
+            processed_data[fea] = group_data[fea].apply(lambda x: ','.join([str(i) for i in x]))
+        processed_data.to_csv(self._output_data, index=False, sep='\t')
+
 def get_common_preprocessors() -> (
     Dict[
         str,
         Union[
-             MovielensDataProcessor
+             MovielensDataProcessor,
+             SidSeqDataProcessor
         ],
     ]
 ):
@@ -318,6 +424,13 @@ def get_common_preprocessors() -> (
         expected_num_unique_items=3706,
         expected_max_item_id=3952,
     )
+    sid_dp = SidSeqDataProcessor(
+        base_dir='tmp',
+        input_data='tmp/sid_seq_data.txt',
+        feature_conf='conf/yy-sid/feature.yaml',
+        output_data='tmp/sid_seq_data_processed.txt'
+    )
     return {
-        "ml-1m": ml_1m_dp
+        "ml-1m": ml_1m_dp,
+        "yy-sid": sid_dp
     }

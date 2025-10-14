@@ -15,10 +15,12 @@
 # pyre-unsafe
 
 from dataclasses import dataclass
+from pyexpat import features
 from typing import List
 
 from generative_recommenders.research.data import item_features
 import pandas as pd
+from typing import Any
 
 import torch
 
@@ -35,7 +37,9 @@ class RecoDataset:
     all_item_ids: List[int]
     train_dataset: torch.utils.data.Dataset
     eval_dataset: torch.utils.data.Dataset
-    max_id: int
+    ufea_num: int
+    ifea_num: int
+    feature_conf: Any
 
 
 def get_reco_dataset(
@@ -46,23 +50,17 @@ def get_reco_dataset(
 ) -> RecoDataset:
     dp = get_common_preprocessors()[dataset_name]
     max_item_id = dp.expected_max_item_id()
-    items = pd.read_csv(dp.processed_item_csv(), delimiter=",")
-    all_item_ids = []
-    for df_index, row in items.iterrows():
-        # print(f"index {df_index}: {row}")
-        movie_id = int(row["movie_id"])
-        all_item_ids.append(movie_id)
-    for x in all_item_ids:
-        assert x > 0, "x in all_item_ids should be positive"
+    all_item_ids = [i for i in range(max_item_id+1)]
 
-    if dataset_name == "ml-1m":
+    if dataset_name == "yy-sid":
         train_dataset = DatasetV2(
             ratings_file=dp.output_format_csv(),
             padding_length=max_sequence_length + 1,  # target
             ignore_last_n=1,
             chronological=chronological,
             sample_ratio=positional_sampling_ratio,
-            item_fea_len = dp.max_jagged_dimension()
+            item_fea_len = dp.max_jagged_dimension(),
+            feature_conf=dp.feature_conf()
         )
         eval_dataset = DatasetV2(
             ratings_file=dp.output_format_csv(),
@@ -70,17 +68,20 @@ def get_reco_dataset(
             ignore_last_n=0,
             chronological=chronological,
             sample_ratio=1.0,
-            item_fea_len = dp.max_jagged_dimension()
+            item_fea_len = dp.max_jagged_dimension(),
+            feature_conf=dp.feature_conf()
         )
     else:
         raise ValueError(f"Unknown dataset {dataset_name}")
 
     return RecoDataset(
         max_sequence_length=max_sequence_length,
-        num_unique_items=dp.expected_num_unique_items(),  # pyre-ignore [6]
+        num_unique_items=len(all_item_ids),  # pyre-ignore [6]
         max_item_id=max_item_id,  # pyre-ignore [6]
         all_item_ids=all_item_ids,
         train_dataset=train_dataset,
         eval_dataset=eval_dataset,
-        max_id=max_item_id
+        ufea_num=dp.ufea_num(),
+        ifea_num=dp.ifea_num(),
+        feature_conf=dp.feature_conf()
     )
