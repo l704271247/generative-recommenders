@@ -111,6 +111,9 @@ class SampledSoftmaxLoss(AutoregressiveLoss):
         Returns:
             Tuple of (loss for the current engaged sequence, str-keyed aux_losses).
         """
+        print(f"output_embeddings: {output_embeddings.shape}")
+        print(f"supervision_embeddings: {supervision_embeddings.shape}")
+        print(f"supervision_ids: {supervision_ids.shape}")
         torch._assert(
             output_embeddings.size() == supervision_embeddings.size(),
             "Invalid supervision embeddings size.",

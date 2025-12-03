@@ -1,12 +1,12 @@
 train_fn.dataset_name = "yy-sid"
 # train_fn.max_sequence_length = 200
-train_fn.max_sequence_length = 203 # 3 for user_fea
-train_fn.local_batch_size = 128
+train_fn.max_sequence_length = 102 # 2 for user_fea
+train_fn.local_batch_size = 512
 
 train_fn.main_module = "HSTU"
 train_fn.dropout_rate = 0.2
 train_fn.user_embedding_norm = "l2_norm"
-train_fn.num_epochs = 101
+train_fn.num_epochs = 1
 train_fn.embedding_dim = 256
 train_fn.min_positive_rating=300
 

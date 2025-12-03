@@ -59,7 +59,7 @@ def get_eval_state(
     # pyre-fixme[29]: `Union[Tensor, Module]` is not a function.
     eval_negative_embeddings = negatives_sampler.normalize_embeddings(
         # pyre-fixme[29]: `Union[Tensor, Module]` is not a function.
-        model.get_embeddings({target_key: eval_negatives_ids})[target_key]
+        model.get_embeddings({target_key: eval_negatives_ids}, False)[target_key]
     )
     if float_dtype is not None:
         eval_negative_embeddings = eval_negative_embeddings.to(float_dtype)
@@ -164,9 +164,11 @@ def eval_metrics_v2_from_tensors(
         eval_top_k_prs = torch.cat(eval_top_k_prs_all, dim=0)
 
     assert eval_top_k_ids.size(1) == k
+    print(f"eval_top_k_ids: {eval_top_k_ids.shape}")
+    print(f"target_ids: {target_ids.shape}")
     _, eval_rank_indices = torch.max(
         torch.cat(
-            [eval_top_k_ids, target_ids],
+            [eval_top_k_ids, target_ids.view(-1, 1)],
             dim=1,
         )
         == target_ids,
@@ -210,7 +212,7 @@ def eval_metrics_v2_from_tensors(
         "mrr": torch.div(1.0, eval_ranks),
     }
     if target_ratings is not None:
-        target_ratings = target_ratings.squeeze(1)  # [B]
+        target_ratings = target_ratings.view(-1)  # [B]
         output["ndcg@10_>=4"] = torch.where(
             eval_ranks[target_ratings >= 4] <= 10,
             torch.div(1.0, torch.log2(eval_ranks[target_ratings >= 4] + 1)),

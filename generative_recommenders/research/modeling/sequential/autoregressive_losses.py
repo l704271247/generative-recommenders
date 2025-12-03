@@ -82,11 +82,13 @@ class LocalNegativesSampler(NegativesSampler):
         all_item_ids: List[int],
         l2_norm: bool,
         l2_norm_eps: float,
+        target_key: str = "sid",
     ) -> None:
         super().__init__(l2_norm=l2_norm, l2_norm_eps=l2_norm_eps)
 
         self._num_items: int = len(all_item_ids)
         self._item_emb: MultiEmbeddingModule = item_emb
+        self._target_key = target_key
         self.register_buffer("_all_item_ids", torch.tensor(all_item_ids))
 
     def debug_str(self) -> str:
@@ -122,7 +124,9 @@ class LocalNegativesSampler(NegativesSampler):
             device=positive_ids.device,
         )
         sampled_ids = self._all_item_ids[sampled_offsets.view(-1)].reshape(output_shape)
-        sampled_emb = self._item_emb.get_embeddings({'movie_id': sampled_ids})['movie_id']
+        sampled_emb = self._item_emb.get_embeddings({self._target_key: sampled_ids})[self._target_key]
+        print(f"loss sampled_ids: {sampled_ids.shape}")
+        print(f"loss sampled_emb: {sampled_emb.shape}")
         return sampled_ids, self.normalize_embeddings(sampled_emb)
 
 

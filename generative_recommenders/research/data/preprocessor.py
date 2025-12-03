@@ -29,7 +29,7 @@ import numpy as np
 import pandas as pd
 import yaml
 
-from run_fractal_expansion import rescale
+# from run_fractal_expansion import rescale
 
 
 logging.basicConfig(stream=sys.stdout, level=logging.INFO)
@@ -380,7 +380,7 @@ class SidSeqDataProcessor:
 
     def processed_data(self):
         # 读取原始数据
-        raw_data = pd.read_csv(self._input_data, '\t')
+        raw_data = pd.read_csv(self._input_data, sep=',')
         user_fea = self._feature_conf['user_fea']
         for fea in user_fea:
             if not user_fea[fea].get('need_code', False):
@@ -427,7 +427,7 @@ def get_common_preprocessors() -> (
     sid_dp = SidSeqDataProcessor(
         base_dir='tmp',
         input_data='tmp/sid_seq_data.txt',
-        feature_conf='conf/yy-sid/feature.yaml',
+        feature_conf='configs/yy-sid/feature.yaml',
         output_data='tmp/sid_seq_data_processed.txt'
     )
     return {

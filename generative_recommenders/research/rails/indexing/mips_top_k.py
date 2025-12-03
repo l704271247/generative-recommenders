@@ -49,6 +49,8 @@ class MIPSBruteForceTopK(MIPSTopKModule):
             item_ids=item_ids,
         )
         del self._item_embeddings
+        print(f"item_embeddings: {item_embeddings.shape}")
+        print(f"item_ids : {item_ids.shape}")
         self._item_embeddings_t: torch.Tensor = item_embeddings.permute(
             2, 1, 0
         ).squeeze(2)

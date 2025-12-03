@@ -124,7 +124,6 @@ class RelativeBucketedTimeAndPositionBasedBias(RelativeAttentionBiasModule):
         """
         B = all_timestamps.size(0)
         N = self._max_seq_len
-        print("test1:", all_timestamps.size())
         t = F.pad(self._pos_w[: 2 * N - 1], [0, N]).repeat(N)
         t = t[..., :-N].reshape(1, N, 3 * N - 2)
         r = (2 * N - 1) // 2
@@ -594,7 +593,7 @@ class HSTU(SequentialEncoderWithLearnedSimilarityModule):
         self._attn_dropout_rate: float = attn_dropout_rate
         self._enable_relative_attention_bias: bool = enable_relative_attention_bias
         self._item_fea_mlp = torch.nn.Linear(
-            in_features=self._embedding_dim * 3,
+            in_features=self._embedding_dim * 5,
             out_features=self._embedding_dim,
         )
         torch.nn.init.xavier_uniform_(self._item_fea_mlp.weight)
@@ -663,8 +662,14 @@ class HSTU(SequentialEncoderWithLearnedSimilarityModule):
                 if self._verbose:
                     print(f"Failed to initialize {name}: {params.data.size()} params")
 
-    def get_embeddings(self, ids:Dict[str, torch.Tensor]) -> Dict[str, torch.Tensor]:
-        return self._embedding_module.get_embeddings(ids)
+    def get_embeddings(self, ids:Dict[str, torch.Tensor], use_sum=True) -> Dict[str, torch.Tensor]:
+        raw_emb_dict = self._embedding_module.get_embeddings(ids)
+        res = {}
+        if use_sum:
+            for k in raw_emb_dict:
+                res[k] = torch.sum(raw_emb_dict[k], dim=-2)
+            return res
+        return raw_emb_dict
 
     def process_embeddings( \
         self,
@@ -676,20 +681,24 @@ class HSTU(SequentialEncoderWithLearnedSimilarityModule):
         for fea in seq_features.item_emb_key:
             if fea == seq_features.target_key:
                 continue
-            item_side_emb_list.append(torch.sum(input_embeddings_dict[fea], dim=-2))
+            item_side_emb_list.append(input_embeddings_dict[fea])
         for fea in seq_features.item_rv_key:
             item_side_emb_list.append(seq_features.past_payloads[fea])
         
         user_fea_emb_list = []
         for fea in seq_features.user_emb_key:
-            user_fea_emb_list.append(orch.sum(input_embeddings_dict[fea], dim=-2))
+            user_fea_emb_list.append(input_embeddings_dict[fea])
         for fea in seq_features.user_rv_key:
             user_fea_emb_list.append(seq_features.past_payloads[fea])
 
 
         item_side_emb = torch.cat(item_side_emb_list, dim=-1)
+        print(f"item_side_emb: {item_side_emb.shape}")
+        print(f"_embedding_dim: {self._embedding_dim}")
+        print(f"self._item_fea_mlp.weight: {self._item_fea_mlp.weight.shape}")
+        print(f"self._item_fea_mlp.bias: {self._item_fea_mlp.bias.shape}")
         item_fea_nn = F.silu(self._item_fea_mlp(item_side_emb))
-        item_processed_emb = torch.sum(input_embeddings_dict[seq_features.target_key], dim=-2) + item_fea_nn
+        item_processed_emb = input_embeddings_dict[seq_features.target_key] + item_fea_nn
         return item_processed_emb, user_fea_emb_list
         
 
@@ -719,6 +728,9 @@ class HSTU(SequentialEncoderWithLearnedSimilarityModule):
         """
         device = past_lengths.device
         float_dtype = past_embeddings.dtype
+        print(f"past_embeddings.size(): {past_embeddings.size()}")
+        print(f"past_lengths: {past_lengths.size()}")
+        print(f"past_ids: {past_ids.size()}")
         B, N, _ = past_embeddings.size()
 
         past_lengths, past_embeddings, _ = self._input_features_preproc(
@@ -758,7 +770,7 @@ class HSTU(SequentialEncoderWithLearnedSimilarityModule):
         B, N, _ = past_embeddings.size()
         fea_num = len(user_fea_list)
         res_past_embeddings = torch.cat(user_fea_list + [past_embeddings], dim=1)
-        res_past_ids = torch.cat([torch.zeros(B, fea_num, dtype=past_ids.dtype), past_ids], dim=1)
+        res_past_ids = torch.cat([torch.zeros(B, fea_num, 1, dtype=past_ids.dtype), past_ids], dim=1)
         res_past_lengths = past_lengths + fea_num
         if TIMESTAMPS_KEY in past_payloads:
             res_past_timestamps = \

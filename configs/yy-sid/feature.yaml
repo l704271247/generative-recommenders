@@ -43,3 +43,23 @@ item_fea:
         need_code: false
         dtype: int
         fea_len: 1
+    is_fav:
+        is_fea: true
+        need_code: true
+        fea_len: 1
+        embedding_table: is_fav_emb_table
+    is_new_fav:
+        is_fea: true
+        need_code: true
+        fea_len: 1
+        embedding_table: is_new_fav_emb_table
+    prod_name:
+        is_fea: true
+        need_code: true
+        fea_len: 1
+        embedding_table: prod_name_emb_table
+    send_barg_cnt:
+        is_fea: true
+        need_code: true
+        fea_len: 1
+        embedding_table: send_barg_cnt_emb_table

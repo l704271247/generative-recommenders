@@ -14,7 +14,7 @@
 
 # pyre-unsafe
 
-from typing import Dict, NamedTuple, Optional, Tuple
+from typing import Dict, NamedTuple, Optional, Tuple, List, Any
 
 from generative_recommenders.research.rails.similarities.mol import item_embeddings_fn
 import torch
@@ -47,7 +47,7 @@ def sid_seq_features_from_row(
     res = {}
     target_key = ""
     rating_key = ""
-    res['historical_lengths'] = row["history_lengths"].to(device)  # [B]
+    res['historical_lengths'] = row["historical_lengths"].to(device)  # [B]
 
     # historical_lengths = row["history_lengths"].to(device)  # [B]
     # historical_ids = row["historical_ids"].to(device)  # [B, N]
@@ -69,11 +69,11 @@ def sid_seq_features_from_row(
     # zip_code = row["zip_code"].to(device).unsqueeze(1)  # [B, 1]
 
     for fea in feature_conf['user_fea']:
-        print(row[fea])
+        print(f"{fea}: {row[fea].shape}")
         res[fea] = row[fea].to(device)
 
     for fea in feature_conf['item_fea']:
-        print(row['target_' + fea])
+        print(f"{'target_' + fea}: {row['target_' + fea].shape}")
         res['target_' + fea] = row['target_' + fea].to(device)
         if feature_conf['item_fea'][fea].get('is_rating', False):
             rating_key = fea
@@ -83,7 +83,6 @@ def sid_seq_features_from_row(
     B = res['historical_lengths'].size(0)
     if max_output_length > 0:
         for fea in feature_conf['item_fea']:
-            print(row['historical_' + fea])
             res[fea] = torch.cat(
                 [
                     row['historical_' + fea].to(device),
@@ -95,14 +94,13 @@ def sid_seq_features_from_row(
                 ],
                 dim=1,
             )
-        res['ts'] = res['ts'].scatter_(
+        res['ts'] = res['ts'].view(B, -1).scatter_(
             dim=1,
             index=res['historical_lengths'].view(-1, 1),
             src=res['target_ts'].view(-1, 1),
         )
     else:
         for fea in feature_conf['item_fea']:
-            print(row['historical_' + fea])
             res[fea] = row['historical_' + fea].to(device)
     
         # historical_ids = torch.cat(

@@ -146,8 +146,10 @@ class CandidateIndex(object):
         )
         # Masks out invalid items rowwise.
         if invalid_ids is not None:
+            print(f"top_k_prime_ids: {top_k_prime_ids.shape}=>{top_k_prime_ids.unsqueeze(2).shape}")
+            print(f"invalid_ids: {invalid_ids.shape}=>{invalid_ids.view(B,1,-1).shape}")
             id_is_valid = ~(
-                (top_k_prime_ids.unsqueeze(2) == invalid_ids.unsqueeze(1)).max(2)[0]
+                (top_k_prime_ids.unsqueeze(2) == invalid_ids.view(B,1,-1)).max(2)[0]
             )  # [B, K + N_0]
             id_is_valid = torch.logical_and(
                 id_is_valid, torch.cumsum(id_is_valid.int(), dim=1) <= k

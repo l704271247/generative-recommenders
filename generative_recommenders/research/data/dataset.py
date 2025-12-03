@@ -81,9 +81,9 @@ class DatasetV2(torch.utils.data.Dataset):
     def conf2torchdtype(self, conf):
         if conf.get('need_code', False):
             return torch.int64
-        elif conf.get('dtype', 'int') == 'int':
+        elif conf.get('dtype', 'int').lower() == 'int':
             return torch.int64
-        elif conf.get('dtype', 'int') == 'float':
+        elif conf.get('dtype', 'int').lower() == 'float':
             return torch.float32
         else:
             return torch.int64
@@ -92,12 +92,12 @@ class DatasetV2(torch.utils.data.Dataset):
         ufea = {}
         ufea_conf = self._feature_conf['user_fea']
         for fea in ufea_conf:
-            ufea[fea] = data[fea].astype(self.str2dtype(ufea_conf[fea].get('dtype', 'int'))).view(-1, ufea_conf[fea].get('fea_len', 1))
-        
+            ufea[fea] = torch.tensor(data[fea], dtype=self.conf2torchdtype(ufea_conf[fea])).view([-1, ufea_conf[fea].get('fea_len', 1)])
+
         ifea = {}
         ifea_conf = self._feature_conf['item_fea']
         for fea in ifea_conf:
-            ifea[fea] = data[fea].astype(self.str2dtype(ifea_conf[fea].get('dtype', 'int')))
+            ifea[fea] = data[fea]
 
         def eval_as_list(x: str, ignore_last_n: int, fea_len: int=1) -> List[List[int]]:
             y = eval(x)
@@ -169,9 +169,9 @@ class DatasetV2(torch.utils.data.Dataset):
         historical_ifea = {}
         target_ifea = {}
         for k,v in sampled_ifea.items():
-            target_ifea['target_' + k] = v[0]
+            target_ifea[k] = v[0]
             tmp_historical_ifea = v[:0:-1] if self._chronological else v[1:]
-            historical_ifea['historical_' + k] = _truncate_or_pad_seq(
+            historical_ifea[k] = _truncate_or_pad_seq(
             tmp_historical_ifea,
             max_seq_len,
             ifea_conf[k].get('fea_len', 1),
@@ -186,9 +186,9 @@ class DatasetV2(torch.utils.data.Dataset):
         ret = {}
         ret.update(ufea)
         for k,v in historical_ifea.items():
-            ret[k] = torch.tensor(v, dtype=self.conf2torchdtype(ifea_conf[k])).view(-1, ifea_conf[k].get('fea_len', 1))
+            ret["historical_" + k] = torch.tensor(v, dtype=self.conf2torchdtype(ifea_conf[k])).view(-1, ifea_conf[k].get('fea_len', 1))
         for k,v in target_ifea.items():
-            ret[k] = torch.tensor(v, dtype=self.conf2torchdtype(ifea_conf[k])).view(-1, ifea_conf[k].get('fea_len', 1))
-        ret['history_length'] = history_length
+            ret["target_" + k] = torch.tensor(v, dtype=self.conf2torchdtype(ifea_conf[k])).view(-1, ifea_conf[k].get('fea_len', 1))
+        ret['historical_lengths'] = history_length
 
         return ret

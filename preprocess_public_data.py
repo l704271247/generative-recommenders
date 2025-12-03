@@ -22,11 +22,11 @@ from generative_recommenders.research.data.preprocessor import get_common_prepro
 
 
 def main() -> None:
-    get_common_preprocessors()["ml-1m"].preprocess_rating()
+    # get_common_preprocessors()["ml-1m"].preprocess_rating()
     # get_common_preprocessors()["ml-20m"].preprocess_rating()
     # get_common_preprocessors()["ml-1b"].preprocess_rating()
     # get_common_preprocessors()["amzn-books"].preprocess_rating()
-
+    get_common_preprocessors()["yy-sid"].processed_data()
 
 if __name__ == "__main__":
     main()
